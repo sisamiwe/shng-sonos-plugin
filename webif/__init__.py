@@ -62,12 +62,11 @@ class WebInterface(SmartPluginWebIf):
         self.tplenv = self.init_template_environment()
 
     def _get_speaker_list(self):
-        """get list of speakers and return it"""
+        """get list of zones and return it"""
 
         speaker_list = []
 
         for zone in self.plugin.zones:
-            # self.logger.debug(f"vars(zone): {vars(zone)}")
             speaker = dict()
             try:
                 speaker['name'] = zone.player_name
@@ -84,6 +83,11 @@ class WebInterface(SmartPluginWebIf):
             except Exception:
                 speaker['uid'] = 'unknown'
 
+            try:
+                speaker['has_satellites'] = zone._has_satellites
+            except Exception:
+                speaker['has_satellites'] = 'unknown'
+
             speaker_list.append(speaker)
 
         self.logger.debug(f"_get_speaker_list: {speaker_list=}")
@@ -93,11 +97,11 @@ class WebInterface(SmartPluginWebIf):
         """get list of items for that plugin and return it"""
 
         item_list = []
+        SONOS_ITEM_ATTR = ['sonos_uid', 'sonos_recv', 'sonos_send', 'sonos_attrib', 'sonos_dpt3_step', 'sonos_dpt3_time']
 
         for item in self.items.return_items():
-            for entry in item.conf:
-                if entry.startswith('sonos'):
-                    item_list.append(item)
+            if any([i in item.conf for i in SONOS_ITEM_ATTR]):
+                item_list.append(item)
 
         self.logger.debug(f"_get_item_list: {item_list=}")
         return item_list
