@@ -34,28 +34,29 @@ import threading
 import time
 import sys
 import requests
-import pkg_resources
-from requests.utils import quote
-from . import utils
 
+from requests.utils import quote
 from collections import OrderedDict
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from queue import Empty
 from urllib.parse import unquote
 
+from . import utils
+
+from .soco import *
+from .soco.exceptions import SoCoUPnPException
+from .soco.music_services import MusicService
+from .soco.data_structures import to_didl_string, DidlItem, DidlMusicTrack
+from .soco.events import event_listener
+from .soco.music_services.data_structures import get_class
+from .soco.snapshot import Snapshot
+from .soco.xml import XML
+from .soco.plugins.sharelink import ShareLinkPlugin
+
+# ToDo: Try/Except kann entfallen, da über die requirements die Vollständigkeit der benötigten Pakete bei Pluginstart geprüft wird
 try:
     import xmltodict
-    import soco
     from tinytag import TinyTag
-    from soco.exceptions import SoCoUPnPException
-    from soco.music_services import MusicService
-    # from soco import *
-    from soco.data_structures import to_didl_string, DidlItem, DidlMusicTrack
-    from soco.events import event_listener
-    from soco.music_services.data_structures import get_class
-    from soco.snapshot import Snapshot
-    from soco.xml import XML
-    from soco.plugins.sharelink import ShareLinkPlugin
     from gtts import gTTS
     REQUIRED_PACKAGE_IMPORTED = True
 except Exception:
@@ -66,9 +67,45 @@ from lib.item import Items
 
 from .webif import WebInterface
 
-_create_speaker_lock = threading.Lock()  # make speaker object creation thread-safe
-sonos_speaker = {}                       # dict to hold all speaker information with soco objects
+_create_speaker_lock = threading.Lock()                         # make speaker object creation thread-safe
+sonos_speaker = {}                                              # dict to hold all speaker information with soco objects
 
+
+# ToDos:
+######################
+# ToDo: Abfragen, ob externe Python Module verfügbar sind entfernen, da diese bei Pluginstart bereits geprüft wurde
+
+# ToDo: Rückumstellen auf locales SoCo
+# ToDo: Itemattribute einführen, dass immer mit dem abgespielten Inhalt gefüllt wird
+
+# ToDo: Methode implementieren, die TTS auf allen verfügbaren Speakern abspielt  "play_tts_all"
+# ToDo: remove_from_sonos_playlist(sonos_playlist, track)       Remove a track from a Sonos Playlist.
+# ToDo: get_sonos_playlist_by_attr(attr_name, match)            Return the first Sonos Playlist DidlPlaylistContainer that matches the attribute specified.
+# ToDo: get_favorite_radio_shows([start, max_items])            Get favorite radio shows from Sonos' Radio app.
+# ToDo: Play sonos_favorite
+# ToDo: Play favorite_radio_stations
+
+# Tests
+# sonos.play_uri('x-rincon-mp3radio://uk6.internet-radio.com:8271/;stream.mp3')
+# sonos.play_uri('http://ia801402.us.archive.org/20/items/TenD2005-07-16.flac16/TenD2005-07-16t10Wonderboy.mp3')
+# track = sonos.get_current_track_info()
+
+
+# Party Mode: Use the partymode() method to join all the devices in your network into a single group, in one command:
+# devices['Living Room'].partymode()
+# devices['Living Room'].all_groups
+
+# zones = list(soco.discover())
+# office = None
+# for z in zones:
+#     z.unjoin()
+#     if z.player_name == "Office":
+#         office = z
+# office.play_from_queue(0)
+
+
+# Play favorite
+# https://github.com/SoCo/SoCo/blob/master/examples/commandline/tunein.py
 
 class WebserviceHttpHandler(BaseHTTPRequestHandler):
     webroot = None
@@ -2321,11 +2358,11 @@ class Speaker(object):
 
         self.logger.debug(f"sonos_playlists: {playlists=}")
 
-        p_l = []
+        sonos_playlist_list = []
         for value in playlists:
-            p_l.append(value.title)
+            sonos_playlist_list.append(value.title)
         for item in self.sonos_playlists_items:
-            item(p_l, self.plugin_shortname)
+            item(sonos_playlist_list, self.plugin_shortname)
 
     def sonos_favorites(self) -> None:
         """
@@ -2338,11 +2375,11 @@ class Speaker(object):
             return
         self.logger.debug(f"sonos_favorites: {favorites=}")
 
-        p_l = []
+        sonos_favorite_list = []
         for value in favorites:
-            p_l.append(value.title)
+            sonos_favorite_list.append(value.title)
         for item in self.sonos_favorites_items:
-            item(p_l, self.plugin_shortname)
+            item(sonos_favorite_list, self.plugin_shortname)
 
     def favorite_radio_stations(self) -> None:
         """
@@ -2355,19 +2392,21 @@ class Speaker(object):
             return
         self.logger.debug(f"favorite_radio_stations: {radio_stations=}")
 
-        p_l = []
+        favorite_radio_station_list = []
         for value in radio_stations:
-            p_l.append(value.title)
+            favorite_radio_station_list.append(value.title)
         for item in self.favorite_radio_stations_items:
-            item(p_l, self.plugin_shortname)
+            item(favorite_radio_station_list, self.plugin_shortname)
 
-    def _play_snippet(self, file_path: str, webservice_url: str, volume: int = -1, duration_offset: float = 0, fade_in=False) -> None:
+    def _play_snippet(self, file_path: str, webservice_url: str, volume: int = -1, duration_offset: float = 0, fade_in: bool = False) -> None:
         self.logger.debug(f"_play_snippet with volume {volume}")
         if not self._check_property():
             return
+        # ToDo: Prüfung, ob Pfad/File vorhanden ist, wurde bereits in den vorgelagerten Methoden geprüft
         if not os.path.isfile(file_path):
             self.logger.error(f"Cannot find snipped file {file_path}")
             return
+        # ToDo: Prüfung, ob das Geräte Coordinator ist, wurde bereits in den vorgelagerten Methoden geprüft
         if not self.is_coordinator:
             sonos_speaker[self.coordinator]._play_snippet(file_path, webservice_url, volume, duration_offset, fade_in)
         else:
@@ -2439,6 +2478,7 @@ class Speaker(object):
         if not self.is_coordinator:
             sonos_speaker[self.coordinator].play_snippet(audio_file, local_webservice_path_snippet, webservice_url, volume, duration_offset, fade_in)
         else:
+            # ToDo: Prüfung, das tinytag verfügbar ist, passiert bereits beim Pluginstart
             if "tinytag" not in sys.modules:
                 self.logger.error("TinyTag module not installed. Please install the module with 'sudo pip3 install tinytag'.")
                 return
@@ -2455,6 +2495,7 @@ class Speaker(object):
         if not self.is_coordinator:
             sonos_speaker[self.coordinator].play_tts(tts, tts_language, local_webservice_path, webservice_url, volume, duration_offset, fade_in)
         else:
+            # ToDo: Prüfung, das tinytag verfügbar ist, passiert bereits beim Pluginstart
             if "tinytag" not in sys.modules:
                 self.logger.error("TinyTag module not installed. Please install the module with 'sudo pip3 install tinytag'.")
                 return
@@ -2519,15 +2560,6 @@ class Sonos(SmartPlugin):
     """
     PLUGIN_VERSION = "1.6.9"
 
-    # ToDo: Methode implementiere, die TTS auf allen verfügbaren Speakern abspielt  "play_tts_all"
-    # ToDo: Item, dass immer mit dem abgespielten Inhalt gefüllt wird
-
-    # ToDo: remove_from_sonos_playlist(sonos_playlist, track)       Remove a track from a Sonos Playlist.
-    # ToDo: get_sonos_playlist_by_attr(attr_name, match)            Return the first Sonos Playlist DidlPlaylistContainer that matches the attribute specified.
-    # ToDo: get_favorite_radio_shows([start, max_items])            Get favorite radio shows from Sonos' Radio app.
-    # ToDo: get_favorite_radio_stations([start, max_items])         Get favorite radio stations from Sonos' Radio app.
-    # ToDo: get_sonos_favorites([start, max_items])                 Get Sonos favorites.
-
     def __init__(self, sh):
         """Initializes the plugin."""
 
@@ -2536,7 +2568,7 @@ class Sonos(SmartPlugin):
 
         # exit if the required package(s) could not be imported
         if not REQUIRED_PACKAGE_IMPORTED:
-            self.logger.error(f"{self.get_fullname()}: Unable to import required external python packages. Please install.")
+            self.logger.error(f"{self.get_fullname()}: Unable to import required external python packages. Please check installation.")
             return
 
         # get the parameters for the plugin (as defined in metadata plugin.yaml):
@@ -2555,13 +2587,13 @@ class Sonos(SmartPlugin):
             self._init_complete = False
             return
 
-        # define further parameter
+        # define further properties
         self.zero_zone = False              # sometimes a discovery scan fails, so try it two times; we need to save the state
         self._sonos_dpt3_step = 2           # default value for dpt3 volume step (step(s) per time period)
         self._sonos_dpt3_time = 1           # default value for dpt3 volume time (time period per step in seconds)
         self.SoCo_nr_speakers = 0           # number of discovered online speaker / zones
-        self._uid_lookup_iterations = 4     # interations of return_parent() on lookup for item uid
-        self._speaker_ips = []              # list if fixed speaker ips
+        self._uid_lookup_levels = 4         # interations of return_parent() on lookup for item uid
+        self._speaker_ips = []              # list of fixed speaker ips
         self.zones = {}                     # dict to hold zone information via soco objects
         self.alive = False                  # plugin alive property
         self.webservice = None              # webservice thread
@@ -2578,10 +2610,10 @@ class Sonos(SmartPlugin):
             else:
                 self.logger.info(f"TTS initialisation failed.")
                 
-        # Read SoCo Version:
-        self._get_soco_version()
+        # read SoCo Version:
+        self.SoCo_version = self._get_soco_version()
 
-        # Configure log level of different SoCo modules:
+        # configure log level of different SoCo modules:
         self._set_soco_logger('WARNING')
         
         # init webinterface
@@ -2721,19 +2753,7 @@ class Sonos(SmartPlugin):
                 volume_helper(int(volume_helper() + 1))
                 volume_helper(int(volume_helper() - 1))
 
-    def _check_webservice_port(self, webservice_port) -> bool:
-        if utils.is_valid_port(str(webservice_port)):
-            self._webservice_port = int(webservice_port)
-            if not utils.is_open_port(self._webservice_port):
-                self.logger.error(f"Your chosen webservice port '{self._webservice_port}' is already in use. TTS disabled!")
-                return False
-        else:
-            self.logger.error(f"Your webservice_port parameter is invalid. '{webservice_port}' is not within port range 1024-65535. TTS disabled!")
-            return False
-            
-        return True
-
-    def _check_webservice_ip(self, webservice_ip) -> bool:
+    def _check_webservice_ip(self, webservice_ip: str) -> bool:
         if not webservice_ip == '' and not webservice_ip == '0.0.0.0':
             if self.is_ip(webservice_ip):
                 self._webservice_ip = webservice_ip
@@ -2750,28 +2770,26 @@ class Sonos(SmartPlugin):
         
         return True
         
-    def _check_local_webservice_path_snippet(self, local_webservice_path_snippet) -> bool:
-        
-        # ToDo: Check ob _local_webservice_path vorhanden
-        
-        # set path
-        if local_webservice_path_snippet == '':
-            self._local_webservice_path_snippet = self._local_webservice_path
+    def _check_webservice_port(self, webservice_port: int) -> bool:
+        if utils.is_valid_port(str(webservice_port)):
+            self._webservice_port = int(webservice_port)
+            if not utils.is_open_port(self._webservice_port):
+                self.logger.error(f"Your chosen webservice port '{self._webservice_port}' is already in use. TTS disabled!")
+                return False
         else:
-            self._local_webservice_path_snippet = local_webservice_path_snippet
-        self.logger.debug(f"Set local webservice snippet path to {self._local_webservice_path_snippet}")
-        
-        # we just need an existing path with read rights, this can be done by the user while shNG is running just throw some warnings
-        if not os.path.exists(self._local_webservice_path_snippet):
-            self.logger.warning(f"Local webservice snippet path was set to '{self._local_webservice_path_snippet}' but doesn't exists.")
-        if not os.access(self._local_webservice_path_snippet, os.R_OK):
-            self.logger.warning(f"Local webservice snippet path '{self._local_webservice_path_snippet}' is not readable.")
-        
+            self.logger.error(f"Your webservice_port parameter is invalid. '{webservice_port}' is not within port range 1024-65535. TTS disabled!")
+            return False
+            
         return True
-        
-    def _check_local_webservice_path(self, local_webservice_path) -> bool:
+
+    def _check_local_webservice_path(self, local_webservice_path: str) -> bool:
     
-        # try creating path
+        # if path is not given, raise error log and disable TTS
+        if local_webservice_path == '':
+            self.logger.warning(f"Mandatory path for local webserver for TTS not given in Plugin parameters. TTS disabled!")
+            return False
+    
+        # if path is given, check avilability, create and check access rights
         try:
             os.makedirs(local_webservice_path, exist_ok=True)
         except OSError:
@@ -2792,10 +2810,39 @@ class Sonos(SmartPlugin):
                 return False
         
         return True
+        
+    def _check_local_webservice_path_snippet(self, local_webservice_path_snippet: str) -> bool:
+        
+        # if path is not given, set local_webservice_path_snippet to _local_webservice_path
+        if local_webservice_path_snippet == '':
+            self._local_webservice_path_snippet = self._local_webservice_path
+            return True
+        
+        # if path is given, check avilability, create and check access rights
+        try:
+            os.makedirs(local_webservice_path_snippet, exist_ok=True)
+        except OSError:
+            self.logger.warning(f"Could not create local webserver path for snippets '{local_webservice_path_snippet}'. Wrong permissions? TTS disabled!")
+            return False
+        else:
+            if os.path.exists(local_webservice_path_snippet):
+                self.logger.debug(f"Local webservice path for snippets set to '{local_webservice_path_snippet}'")
+            else:
+                self.logger.warning(f"Local webservice path for snippets '{local_webservice_path_snippet}' for TTS not exists. TTS disabled!")
+                return False
 
+            if os.access(local_webservice_path_snippet, os.W_OK):
+                self.logger.debug(f"Write permissions ok for tts on path {local_webservice_path_snippet}")
+                self._local_webservice_path_snippet = local_webservice_path_snippet
+            else:
+                self.logger.warning(f"Local webservice path for snippets '{local_webservice_path_snippet}' is not writeable for current user. TTS disabled!")
+                return False
+        
+        return True
+      
     def _get_free_diskspace(self) -> None:
         """
-        get free diskspace and log it
+        get free diskspace and put it to logger
         :return:
         """
 
@@ -2815,13 +2862,10 @@ class Sonos(SmartPlugin):
                                            self._webservice_port,
                                            self._local_webservice_path,
                                            self._local_webservice_path_snippet)
-
-        self.logger.debug(f"Webserice init with: ip={self._webservice_ip}, port={self._webservice_port}, "
-                          f"path={self._local_webservice_path}, snippet_path={self._local_webservice_path_snippet}")
-
+        self.logger.debug(f"Webservice init done with: ip={self._webservice_ip}, port={self._webservice_port}, path={self._local_webservice_path}, snippet_path={self._local_webservice_path_snippet}")
         self.webservice.start()
         
-    def _init_tts(self, webservice_ip, webservice_port, local_webservice_path, local_webservice_path_snippet) -> bool:
+    def _init_tts(self, webservice_ip: str, webservice_port: int, local_webservice_path: str, local_webservice_path_snippet: str) -> bool:
         """
         Init the TTS service
         :param webservice_ip:
@@ -2846,8 +2890,10 @@ class Sonos(SmartPlugin):
         
         return True
 
-    def _parse_speaker_ips(self, speaker_ips) -> list:
-        # check user specified sonos speaker ips
+    def _parse_speaker_ips(self, speaker_ips: list) -> list:
+        """
+        check user specified sonos speaker ips
+        """
         
         for ip in speaker_ips:
             if self.is_ip(ip):
@@ -2857,31 +2903,22 @@ class Sonos(SmartPlugin):
         # return unique items in list
         return utils.unique_list(self._speaker_ips)
 
-    def _get_soco_version(self) -> None:
+    def _get_soco_version(self) -> str:
         """
-        Get version of used Soco
+        Get version of used Soco and return it
         :return:
         """
-        soco_version = None
 
-        # Use installed Soco version (from requirements)
         try:
-            soco_version = pkg_resources.get_distribution("soco").version
+            src = io.open('plugins/sonos/soco/__init__.py', encoding='utf-8').read()
+            metadata = dict(re.findall("__([a-z]+)__ = \"([^\"]+)\"", src))
         except Exception:
-            pass
-
-        # Use local Soco version
-        if soco_version is None:
-            try:
-                src = io.open('plugins/sonos/soco/__init__.py', encoding='utf-8').read()
-                metadata = dict(re.findall("__([a-z]+)__ = \"([^\"]+)\"", src))
-            except Exception:
-                pass
-            else:
-                soco_version = metadata['version']
-
-        self.SoCo_version = soco_version
-        self.logger.info(f"Loading SoCo version {self.SoCo_version}.")
+            self.logger.warning(f"Version of used Soco module not available")
+            return ''
+        else:
+            soco_version = metadata['version']
+            self.logger.info(f"Loading SoCo version {soco_version}.")
+            return soco_version
 
     def _set_soco_logger(self, level: str = 'WARNING') -> None:
         """
@@ -2901,7 +2938,7 @@ class Sonos(SmartPlugin):
     def parse_logic(self, logic):
         pass
 
-    def update_item(self, item: Items, caller: object = str, source: object = str, dest: object = str) -> None:
+    def update_item(self, item: Items, caller: object, source: object, dest: object) -> None:
         """
         Write items values
         :param item: item to be updated towards the plugin
@@ -2994,7 +3031,7 @@ class Sonos(SmartPlugin):
                     fade_in = self._resolve_child_command_bool(item, 'snippet_fade_in')
                     sonos_speaker[uid].play_snippet(item(), self._local_webservice_path_snippet, self._webservice_url, volume, self._snippet_duration_offset, fade_in)
 
-    def _resolve_child_command_str(self, item: Items, child_command, default_value="") -> str:
+    def _resolve_child_command_str(self, item: Items, child_command: str, default_value: str = "") -> str:
         """
         Resolves a child command of type str for an item
         :type child_command: The sonos_attrib name for the child
@@ -3012,7 +3049,7 @@ class Sonos(SmartPlugin):
                     return child()
         return default_value
 
-    def _resolve_child_command_bool(self, item: Items, child_command) -> bool:
+    def _resolve_child_command_bool(self, item: Items, child_command: str) -> bool:
         """
         Resolves a child command of type bool for an item
         :type child_command: The sonos_attrib name for the child
@@ -3027,7 +3064,7 @@ class Sonos(SmartPlugin):
                     return child()
         return False
 
-    def _resolve_child_command_int(self, item: Items, child_command, default_value=0) -> int:
+    def _resolve_child_command_int(self, item: Items, child_command: str, default_value: int = 0) -> int:
         """
         Resolves a child command of type int for an item
         :type default_value: the default value, if the child not exists or an error occurred
@@ -3096,7 +3133,7 @@ class Sonos(SmartPlugin):
         uid = ''
 
         lookup_item = item
-        for i in range(self._uid_lookup_iterations):
+        for i in range(self._uid_lookup_levels):
             uid = self.get_iattr_value(lookup_item.conf, 'sonos_uid')
             if uid is not None:
                 uid = uid.lower()
@@ -3126,7 +3163,7 @@ class Sonos(SmartPlugin):
         # Create Soco objects if IPs are given, otherwise discover speakers and create Soco objects
         if self._speaker_ips:
             for ip in self._speaker_ips:
-                zones.append(soco.SoCo(ip))
+                zones.append(SoCo(ip))
         else:
             try:
                 zones = soco.discover(timeout=5)
@@ -3181,7 +3218,7 @@ class Sonos(SmartPlugin):
                         self.logger.warning(f"Exception in discover -> sonos_speaker[uid].soco: {e}")
                     else:
                         if zone is not zone_compare:
-                            self.logger.debug(f"zone is not in speaker list jet. Adding and subscribing zone {zone}.")
+                            self.logger.debug(f"zone is not in speaker list, yet. Adding and subscribing zone {zone}.")
                             sonos_speaker[uid].soco = zone
                             sonos_speaker[uid].subscribe_base_events()
                         else:
@@ -3223,15 +3260,16 @@ class Sonos(SmartPlugin):
         # Extract number of online speakers:
         self.SoCo_nr_speakers = online_speaker_count 
 
-    def _is_speaker_up(self, uid, ip_address) -> bool:
+    def _is_speaker_up(self, uid: str, ip_address: str) -> bool:
         """
         Check if speaker is available via Ping
+        Note: don't trust the discover function, offline speakers can be cached, we try to ping the speaker
+        
         :param uid:
         :param ip_address:
         :return:
         """
 
-        # don't trust the discover function, offline speakers can be cached, we try to ping the speaker
         self.logger.debug(f"Pinging speaker {uid} with ip {ip_address}")
         try:
             proc_result = subprocess.run(['ping', '-i', '0.2', '-c', '2', ip_address],
@@ -3244,7 +3282,7 @@ class Sonos(SmartPlugin):
             self.logger.debug(f"Ping {ip_address} process timed out")
             return False     
 
-    def _get_zone_name_from_uid(self, uid) -> str:
+    def _get_zone_name_from_uid(self, uid: str) -> str:
         """
         Return zone/speaker name per uid
         """
@@ -3255,6 +3293,9 @@ class Sonos(SmartPlugin):
 
     @property
     def sonos_speaker(self):
+        """
+        Returns sonos_speaker dict
+        """
         return sonos_speaker
 
 

@@ -43,6 +43,7 @@ parameters:
 
   local_webservice_path:
     type: str
+    default: /tmp/tts
     description:
       de: '(optional) In dieses Verzeichnis werden alle TTS-Dateien automatisch gespeichert. \n
            Ist die Option "tts" aktiviert, dann muss diese Option gesetzt sein.'
