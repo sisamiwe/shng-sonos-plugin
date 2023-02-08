@@ -2376,8 +2376,8 @@ class Speaker(object):
         self.logger.debug(f"sonos_favorites: {favorites=}")
 
         sonos_favorite_list = []
-        for value in favorites:
-            sonos_favorite_list.append(value.title)
+        for favorite in favorites:
+            sonos_favorite_list.append(favorite.title)
         for item in self.sonos_favorites_items:
             item(sonos_favorite_list, self.plugin_shortname)
 
@@ -2393,8 +2393,8 @@ class Speaker(object):
         self.logger.debug(f"favorite_radio_stations: {radio_stations=}")
 
         favorite_radio_station_list = []
-        for value in radio_stations:
-            favorite_radio_station_list.append(value.title)
+        for favorite in radio_stations:
+            favorite_radio_station_list.append(favorite.title)
         for item in self.favorite_radio_stations_items:
             item(favorite_radio_station_list, self.plugin_shortname)
 
