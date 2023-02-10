@@ -56,37 +56,6 @@ class WebInterface(SmartPluginWebIf):
         
         self.tplenv = self.init_template_environment()
 
-    def _get_speaker_list(self):
-        """get list of zones and return it"""
-
-        speaker_list = []
-
-        for zone in self.plugin.zones:
-            speaker = dict()
-            try:
-                speaker['name'] = zone.player_name
-            except Exception:
-                speaker['name'] = 'unknown'
-
-            try:
-                speaker['ip'] = zone.ip_address
-            except Exception:
-                speaker['ip'] = 'unknown'
-
-            try:
-                speaker['uid'] = zone.uid
-            except Exception:
-                speaker['uid'] = 'unknown'
-
-            try:
-                speaker['has_satellites'] = zone._has_satellites
-            except Exception:
-                speaker['has_satellites'] = 'unknown'
-
-            speaker_list.append(speaker)
-
-        return speaker_list
-
     @cherrypy.expose
     def index(self, reload=None):
         """
@@ -104,7 +73,6 @@ class WebInterface(SmartPluginWebIf):
                            webif_pagelength=pagelength,
                            item_list=self.plugin.item_list,
                            item_count=len(self.plugin.item_list),
-                           speaker_list=self._get_speaker_list(),
                            plugin_shortname=self.plugin.get_shortname(),
                            plugin_version=self.plugin.get_version(),
                            plugin_info=self.plugin.get_info(),
@@ -123,9 +91,7 @@ class WebInterface(SmartPluginWebIf):
         :return: dict with the data needed to update the web page.
         """
 
-        # if dataSets are used, define them here
         if dataSet == 'overview':
-            # get the new data from the plugin variable called _webdata
             data = dict()
             try:
                 data = json.dumps(data)
@@ -137,7 +103,7 @@ class WebInterface(SmartPluginWebIf):
             data = dict()
 
             data['items'] = {}
-            for item in self._get_item_list():
+            for item in self.plugin.item_list:
                 data['items'][item.id()] = {}
                 data['items'][item.id()]['value'] = item() if item() is not None else '-'
                 data['items'][item.id()]['last_update'] = item.property.last_update.strftime('%d.%m.%Y %H:%M:%S')

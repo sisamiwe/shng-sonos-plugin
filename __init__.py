@@ -2588,10 +2588,11 @@ class Sonos(SmartPlugin):
             else:
                 self.logger.info(f"TTS initialisation failed.")
                 
-        # read SoCo Version:
+        # read SoCo version:
         self.SoCo_version = self.get_soco_version()
+        self.logger.info(f"Loading SoCo version {self.SoCo_version}.")
 
-        # configure log level of different SoCo modules:
+        # configure log level of SoCo modules:
         self._set_soco_logger('WARNING')
         
         # init webinterface
@@ -2902,7 +2903,6 @@ class Sonos(SmartPlugin):
             return ''
         else:
             soco_version = metadata['version']
-            self.logger.info(f"Loading SoCo version {soco_version}.")
             return soco_version
 
     def _set_soco_logger(self, level: str = 'WARNING') -> None:
