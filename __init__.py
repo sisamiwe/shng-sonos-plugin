@@ -82,21 +82,6 @@ sonos_speaker = {}                                              # dict to hold a
 # ToDo: Play sonos_favorite
 # ToDo: Play favorite_radio_stations
 # ToDo: Operating on All Speakers: Using _all_ as Speaker name
-# ToDo
-
-# PartyMode
-######################
-# Party Mode: Use the partymode() method to join all the devices in your network into a single group, in one command:
-# devices['Living Room'].partymode()
-# devices['Living Room'].all_groups
-
-# zones = list(soco.discover())
-# office = None
-# for z in zones:
-#     z.unjoin()
-#     if z.player_name == "Office":
-#         office = z
-# office.play_from_queue(0)
 
 
 class WebserviceHttpHandler(BaseHTTPRequestHandler):
