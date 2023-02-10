@@ -52,6 +52,7 @@ parameters:
 
   local_webservice_path_snippet:
     type: str
+    default: ''
     description:
       de: '(optional) Die eigenen Audio-Snippet Dateien können beim Setzen dieser Option getrennt von den automatisch generierten \n
             TTS-Dateien gespeichert werden. Wird diese Option nicht gesetzt und "tts" ist aktiviert, so wird der Wert \n
@@ -107,7 +108,6 @@ parameters:
            -1 shows all table entries on one page.'
 
 item_attributes:
-
   sonos_uid:
     type: str
     description:

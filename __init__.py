@@ -71,26 +71,21 @@ _create_speaker_lock = threading.Lock()                         # make speaker o
 sonos_speaker = {}                                              # dict to hold all speaker information with soco objects
 
 
-# ToDos:
+# Cleaning
 ######################
 # ToDo: Abfragen, ob externe Python Module verfügbar sind entfernen, da diese bei Pluginstart bereits geprüft wurde
 
-# ToDo: Rückumstellen auf locales SoCo
+# Enhancement
+######################
 # ToDo: Itemattribute einführen, dass immer mit dem abgespielten Inhalt gefüllt wird
-
-# ToDo: Methode implementieren, die TTS auf allen verfügbaren Speakern abspielt  "play_tts_all"
-# ToDo: remove_from_sonos_playlist(sonos_playlist, track)       Remove a track from a Sonos Playlist.
-# ToDo: get_sonos_playlist_by_attr(attr_name, match)            Return the first Sonos Playlist DidlPlaylistContainer that matches the attribute specified.
-# ToDo: get_favorite_radio_shows([start, max_items])            Get favorite radio shows from Sonos' Radio app.
+# ToDo: Methode implementieren, die TTS auf allen verfügbaren Speakern abspielt  "play_tts_all" / PartyMode
 # ToDo: Play sonos_favorite
 # ToDo: Play favorite_radio_stations
+# ToDo: Operating on All Speakers: Using _all_ as Speaker name
+# ToDo
 
-# Tests
-# sonos.play_uri('x-rincon-mp3radio://uk6.internet-radio.com:8271/;stream.mp3')
-# sonos.play_uri('http://ia801402.us.archive.org/20/items/TenD2005-07-16.flac16/TenD2005-07-16t10Wonderboy.mp3')
-# track = sonos.get_current_track_info()
-
-
+# PartyMode
+######################
 # Party Mode: Use the partymode() method to join all the devices in your network into a single group, in one command:
 # devices['Living Room'].partymode()
 # devices['Living Room'].all_groups
@@ -103,9 +98,6 @@ sonos_speaker = {}                                              # dict to hold a
 #         office = z
 # office.play_from_queue(0)
 
-
-# Play favorite
-# https://github.com/SoCo/SoCo/blob/master/examples/commandline/tunein.py
 
 class WebserviceHttpHandler(BaseHTTPRequestHandler):
     webroot = None
@@ -174,7 +166,7 @@ class WebserviceHttpHandler(BaseHTTPRequestHandler):
         except IOError as ex:
             if ex.errno == errno.EPIPE:
                 # EPIPE error
-                self.logger.error(f"EPipe exception occured while delivering file {file_path}")
+                self.logger.error(f"EPipe exception occurred while delivering file {file_path}")
                 self.logger.error(f"Exception: {ex}")
             else:
                 # Other error
@@ -1295,7 +1287,7 @@ class Speaker(object):
 
     def get_status_light(self) -> bool:
         """
-        Calls the SoCo function to get the led of the speaker.
+        Calls the SoCo function to get the LED status of the speaker.
         :rtype: bool
         :return: 'True' for Led on, 'False' for Led off or Exception
         """
@@ -2369,7 +2361,7 @@ class Speaker(object):
         Gets all Sonos favorites.
         """
         try:
-            favorites = self.soco.music_library.get_sonos_favorites()
+            favorites = self.soco.music_library.get_sonos_favorites(complete_result=True)
         except Exception as e:
             self.logger.info(f"Error during soco.music_library.get_sonos_favorites(): {e}")
             return
@@ -2592,9 +2584,10 @@ class Sonos(SmartPlugin):
         self._sonos_dpt3_step = 2           # default value for dpt3 volume step (step(s) per time period)
         self._sonos_dpt3_time = 1           # default value for dpt3 volume time (time period per step in seconds)
         self.SoCo_nr_speakers = 0           # number of discovered online speaker / zones
-        self._uid_lookup_levels = 4         # interations of return_parent() on lookup for item uid
+        self._uid_lookup_levels = 4         # iterations of return_parent() on lookup for item uid
         self._speaker_ips = []              # list of fixed speaker ips
         self.zones = {}                     # dict to hold zone information via soco objects
+        self.item_list = []                 # list of all items, used by / linked to that plugin
         self.alive = False                  # plugin alive property
         self.webservice = None              # webservice thread
         
@@ -2611,7 +2604,7 @@ class Sonos(SmartPlugin):
                 self.logger.info(f"TTS initialisation failed.")
                 
         # read SoCo Version:
-        self.SoCo_version = self._get_soco_version()
+        self.SoCo_version = self.get_soco_version()
 
         # configure log level of different SoCo modules:
         self._set_soco_logger('WARNING')
@@ -2627,7 +2620,7 @@ class Sonos(SmartPlugin):
         self._discover()
         if not self._speaker_ips:
             self.scheduler_add("sonos_discover_scheduler", self._discover, prio=3, cron=None, cycle=self._discover_cycle, value=None, offset=None, next=None)
-        
+
         # set plugin to alive
         self.alive = True
 
@@ -2674,16 +2667,22 @@ class Sonos(SmartPlugin):
                 attr = getattr(sonos_speaker[uid], list_name)
                 self.logger.debug(f"Adding item {item.id()} to {uid}: list {list_name}")
                 attr.append(item)
+                if item not in self.item_list:
+                    self.item_list.append(item)
             except Exception:
                 self.logger.warning(f"No item list available for sonos_cmd '{item_attribute}'.")
 
         if self.has_iattr(item.conf, 'sonos_send'):
             self.logger.debug(f"Item {item.id()} registered to 'sonos_send' commands.")
+            if item not in self.item_list:
+                self.item_list.append(item)
             return self.update_item
 
         # some special handling for dpt3 volume
         if self.has_iattr(item.conf, 'sonos_attrib'):
             if self.get_iattr_value(item.conf, 'sonos_attrib') != 'vol_dpt3':
+                if item not in self.item_list:
+                    self.item_list.append(item)
                 return
 
             # check, if a volume parent item exists
@@ -2721,6 +2720,8 @@ class Sonos(SmartPlugin):
                 item.conf['sonos_dpt3_time'] = self._sonos_dpt3_time
                 self.logger.debug(f"No sonos_dpt3_time defined, using default value {self._sonos_dpt3_time}.")
 
+            if item not in self.item_list:
+                self.item_list.append(item)
             return self._handle_dpt3
 
     def _handle_dpt3(self, item, caller=None, source=None, dest=None):
@@ -2903,10 +2904,9 @@ class Sonos(SmartPlugin):
         # return unique items in list
         return utils.unique_list(self._speaker_ips)
 
-    def _get_soco_version(self) -> str:
+    def get_soco_version(self) -> str:
         """
         Get version of used Soco and return it
-        :return:
         """
 
         try:
@@ -3148,7 +3148,7 @@ class Sonos(SmartPlugin):
 
         return uid
 
-    def _discover(self) -> None:
+    def _discover(self, force: bool = False) -> None:
         """
         Discover Sonos speaker in the network. If the plugin parameter 'speaker_ips' has IP addresses, no discover package is sent over the network.
         :rtype: None
@@ -3161,7 +3161,7 @@ class Sonos(SmartPlugin):
         zones = []
         
         # Create Soco objects if IPs are given, otherwise discover speakers and create Soco objects
-        if self._speaker_ips:
+        if self._speaker_ips and not force:
             for ip in self._speaker_ips:
                 zones.append(SoCo(ip))
         else:
@@ -3254,7 +3254,7 @@ class Sonos(SmartPlugin):
         # dispose every speaker that was not found
         for uid in set(sonos_speaker.keys()) - set(handled_speaker.keys()):
             if sonos_speaker[uid].soco is not None:
-                self.logger.debug(f"Removing undiscovered speaker: {zone.ip_address}, {uid}")
+                self.logger.debug(f"Removing undiscovered speaker: {sonos_speaker[uid].ip_address}, {uid}")
                 sonos_speaker[uid].dispose()
 
         # Extract number of online speakers:
@@ -3297,6 +3297,13 @@ class Sonos(SmartPlugin):
         Returns sonos_speaker dict
         """
         return sonos_speaker
+
+    @property
+    def log_level(self):
+        """
+        Returns current logging level
+        """
+        return self.logger.getEffectiveLevel()
 
 
 def _initialize_speaker(uid: str, logger: logging, plugin_shortname: str) -> None:

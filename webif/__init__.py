@@ -25,20 +25,15 @@
 #
 #########################################################################
 
-import datetime
-import time
-import os
-import json
-
 from lib.item import Items
 from lib.model.smartplugin import SmartPluginWebIf
-
 
 # ------------------------------------------
 #    Webinterface of the plugin
 # ------------------------------------------
 
 import cherrypy
+import json
 import csv
 from jinja2 import Environment, FileSystemLoader
 
@@ -58,7 +53,7 @@ class WebInterface(SmartPluginWebIf):
         self.webif_dir = webif_dir
         self.plugin = plugin
         self.items = Items.get_instance()
-
+        
         self.tplenv = self.init_template_environment()
 
     def _get_speaker_list(self):
@@ -90,21 +85,7 @@ class WebInterface(SmartPluginWebIf):
 
             speaker_list.append(speaker)
 
-        self.logger.debug(f"_get_speaker_list: {speaker_list=}")
         return speaker_list
-
-    def _get_item_list(self):
-        """get list of items for that plugin and return it"""
-
-        item_list = []
-        SONOS_ITEM_ATTR = ['sonos_uid', 'sonos_recv', 'sonos_send', 'sonos_attrib', 'sonos_dpt3_step', 'sonos_dpt3_time']
-
-        for item in self.items.return_items():
-            if any([i in item.conf for i in SONOS_ITEM_ATTR]):
-                item_list.append(item)
-
-        self.logger.debug(f"_get_item_list: {item_list=}")
-        return item_list
 
     @cherrypy.expose
     def index(self, reload=None):
@@ -116,35 +97,19 @@ class WebInterface(SmartPluginWebIf):
         :return: contents of the template after being rendered
         """
 
+        pagelength = self.plugin.get_parameter_value('webif_pagelength')
         tmpl = self.tplenv.get_template('index.html')
 
-        # get speaker_list
-        speaker_list_sorted = sorted(self._get_speaker_list(), key=lambda k: k['name'])
-
-        # get item_list
-        item_list = self._get_item_list()
-
-        # try to get the webif pagelength from the module.yaml configuration
-        global_pagelength = cherrypy.config.get("webif_pagelength")
-        if global_pagelength:
-            pagelength = global_pagelength
-            self.logger.debug("Global pagelength {}".format(pagelength))
-        # try to get the webif pagelength from the plugin specific plugin.yaml configuration
-        try:
-            pagelength = self.plugin.webif_pagelength
-            self.logger.debug("Plugin pagelength {}".format(pagelength))
-        except Exception:
-            pagelength = 100
-
-        # add values to be passed to the Jinja2 template eg: tmpl.render(p=self.plugin, interface=interface, ...)
         return tmpl.render(p=self.plugin,
                            webif_pagelength=pagelength,
-                           item_list=item_list,
-                           item_count=len(item_list),
+                           item_list=self.plugin.item_list,
+                           item_count=len(self.plugin.item_list),
                            speaker_list=self._get_speaker_list(),
                            plugin_shortname=self.plugin.get_shortname(),
                            plugin_version=self.plugin.get_version(),
                            plugin_info=self.plugin.get_info(),
+                           soco_version=self.plugin.SoCo_version,
+                           maintenance=True if self.plugin.log_level <= 20 else False,
                            )
 
     @cherrypy.expose
@@ -157,26 +122,34 @@ class WebInterface(SmartPluginWebIf):
         :param dataSet: Dataset for which the data should be returned (standard: None)
         :return: dict with the data needed to update the web page.
         """
+
         # if dataSets are used, define them here
         if dataSet == 'overview':
             # get the new data from the plugin variable called _webdata
-            data = self.plugin._webdata
+            data = dict()
             try:
                 data = json.dumps(data)
                 return data
             except Exception as e:
                 self.logger.error(f"get_data_html exception: {e}")
+        
         if dataSet is None:
-            # get the new data
-            data = {}
+            data = dict()
 
-            # data['item'] = {}
-            # for i in self.plugin.items:
-            #     data['item'][i]['value'] = self.plugin.getitemvalue(i)
-            #
-            # return it as json the web page
-            # try:
-            #     return json.dumps(data)
-            # except Exception as e:
-            #     self.logger.error("get_data_html exception: {}".format(e))
-        return {}
+            data['items'] = {}
+            for item in self._get_item_list():
+                data['items'][item.id()] = {}
+                data['items'][item.id()]['value'] = item() if item() is not None else '-'
+                data['items'][item.id()]['last_update'] = item.property.last_update.strftime('%d.%m.%Y %H:%M:%S')
+                data['items'][item.id()]['last_change'] = item.property.last_change.strftime('%d.%m.%Y %H:%M:%S')
+            
+            data['maintenance'] = True if self.plugin.log_level <= 20 else False
+
+            try:
+                return json.dumps(data, default=str)
+            except Exception as e:
+                self.logger.error(f"get_data_html exception: {e}")
+                
+    @cherrypy.expose
+    def discover(self):
+        self.plugin._discover(True)

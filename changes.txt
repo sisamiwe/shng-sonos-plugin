@@ -23,9 +23,12 @@ Plugin Changes
 			- move checks and init of tts into own method
 			- move reading and log of used Soco version to own method
 			- move setting of Soco log-level to own method
+			- add item_list parameter
 		- run
 			- add initial speaker discovery in run method
-		- add scheduler for speaker discovery just if there are no fixed IPs given
+		    - add scheduler for speaker discovery just if there are no fixed IPs given
+        - parse_item
+            - add valid item for plugin to item_list
 		- add new method _check_webservice_port
 		- add new method _check_webservice_ip
 		- add new method _check_local_webservice_path_snippet
@@ -35,7 +38,7 @@ Plugin Changes
 		- add new method _init_webservice
 		- add new method _init_tts
 		- add new method _parse_speaker_ips
-		- add new method _get_soco_version
+		- add new method get_soco_version
 		- add new method _set_soco_logger
 		_resolve_uid
 			- change to do rekursive look-up of item with speaker uid up to 4 levels higher in item tree
@@ -68,6 +71,17 @@ Plugin Changes
 	
 - .webif\__init__.py
 	- support webif data
+	- add method _get_speaker_list
+	- add method _get_item_list
+	- index
+		- add global_pagelength
+		- change/enhance return content
+	- get_data_html
+		- add item values for updating web interface
+	- add method discover to allow discovery by button on WebIF
 
 - .webif\templates\index.html
 	- implement webif according to current template
+
+- .examples
+    - moved to items structs in plugin.yaml
