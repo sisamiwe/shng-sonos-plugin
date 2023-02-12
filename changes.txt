@@ -1,84 +1,41 @@
 Plugin Changes
 
+- general:
+    - remove try/except for import of external modules; already part of smartplugin-class
+
 - __init__.py
-	- general:
-		- implement f-Strings and remove .format()
-		- harmonize log levels and log messages
-		- sort and struct import of python modules
-		- put all imports of exclusive python modules in try - except
-	
 	- class Speaker
-		- add method favorite_radio_stations
-		- add method sonos_favorites
-		- add method favorite_radio_stations
-		- add new methods in _zone_topology_event
-		- remove hard-coded "Sonos" to plugin short-name
-		
+		- add method _play_favorite
+		- add method play_favorite_title
+		- add method play_favorite_number
+		- add method _play_favorite_radio
+		- add method play_favorite_radio_number
+		- add method play_favorite_radio_title
+		- remove check if tinytag is available; already done at startup
+
 	- class Sonos(SmartPlugin)
-		- bump version
+		- bump version to 1.8.0
 		- __init__
-			- adapt code to new plugin template
-			- put getting plugin parameters in try-except
-			- move handling of fixed speaker ips to own method
-			- move checks and init of tts into own method
-			- move reading and log of used Soco version to own method
-			- move setting of Soco log-level to own method
-			- add item_list parameter
-		- run
-			- add initial speaker discovery in run method
-		    - add scheduler for speaker discovery just if there are no fixed IPs given
-        - parse_item
-            - add valid item for plugin to item_list
-		- add new method _check_webservice_port
-		- add new method _check_webservice_ip
-		- add new method _check_local_webservice_path_snippet
-			- create path if given and not available
-		- add new method _check_local_webservice_path
-		- add new method _get_free_diskspace
-		- add new method _init_webservice
-		- add new method _init_tts
-		- add new method _parse_speaker_ips
-		- add new method get_soco_version
-		- add new method _set_soco_logger
-		_resolve_uid
-			- change to do rekursive look-up of item with speaker uid up to 4 levels higher in item tree
-		- add method _get_zone_name_from_uid
-		- add property sonos_speaker
+			- delete check of REQUIRED_PACKAGE_IMPORTED
+		- update_item:
+		    - add handling of play_favorite_title, play_favorite_number, play_favorite_radio_number, play_favorite_radio_title
+
 
 - plugin.yaml
-	- bump to new version
-	- adapt sh_minversion
-	- adapt py_minversion
-	- Clean formatting
-	- add default to local_webservice_path
-	- set value limits for webservice_port
-	- add parameter webif_pagelength
-	- enhance attribute description
-	- add neu attributes
-	- add items structs
-	
-- requirements.txt
-	- remove packets moved to core requirements
+	- add new 'send-attributes'
 
-- utils.py
-	- formatting
-	
-- user_doc.rst
+- requirements.txt
 	-
 
+- user_doc.rst
+	- typo correction
+	- add description of new functions
+
 - README.md
-	- 
-	
+	-
+
 - .webif\__init__.py
 	- support webif data
-	- add method _get_speaker_list
-	- add method _get_item_list
-	- index
-		- add global_pagelength
-		- change/enhance return content
-	- get_data_html
-		- add item values for updating web interface
-	- add method discover to allow discovery by button on WebIF
 
 - .webif\templates\index.html
 	- implement webif according to current template

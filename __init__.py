@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # vim: set encoding=utf-8 tabstop=4 softtabstop=4 shiftwidth=4 expandtab
 #########################################################################
-#  Copyright 2016-       pfischi, aswitch, sisamiwe                     #
+#  Copyright 2016-       pfischi, aschwith, sisamiwe                    #
 #########################################################################
 #  This file is part of SmartHomeNG.   
 #
@@ -53,14 +53,9 @@ from .soco.snapshot import Snapshot
 from .soco.xml import XML
 from .soco.plugins.sharelink import ShareLinkPlugin
 
-# ToDo: Try/Except kann entfallen, da über die requirements die Vollständigkeit der benötigten Pakete bei Pluginstart geprüft wird
-try:
-    import xmltodict
-    from tinytag import TinyTag
-    from gtts import gTTS
-    REQUIRED_PACKAGE_IMPORTED = True
-except Exception:
-    REQUIRED_PACKAGE_IMPORTED = False
+import xmltodict
+from tinytag import TinyTag
+from gtts import gTTS
 
 from lib.model.smartplugin import SmartPlugin
 from lib.item import Items
@@ -70,17 +65,10 @@ from .webif import WebInterface
 _create_speaker_lock = threading.Lock()                         # make speaker object creation thread-safe
 sonos_speaker = {}                                              # dict to hold all speaker information with soco objects
 
-
-# Cleaning
-######################
-# ToDo: Abfragen, ob externe Python Module verfügbar sind entfernen, da diese bei Pluginstart bereits geprüft wurde
-
-# Enhancement
+# Planned Enhancement
 ######################
 # ToDo: Itemattribute einführen, dass immer mit dem abgespielten Inhalt gefüllt wird
 # ToDo: Methode implementieren, die TTS auf allen verfügbaren Speakern abspielt  "play_tts_all" / PartyMode
-# ToDo: Play sonos_favorite
-# ToDo: Play favorite_radio_stations
 # ToDo: Operating on All Speakers: Using _all_ as Speaker name
 
 
@@ -2377,77 +2365,75 @@ class Speaker(object):
 
     def _play_snippet(self, file_path: str, webservice_url: str, volume: int = -1, duration_offset: float = 0, fade_in: bool = False) -> None:
         self.logger.debug(f"_play_snippet with volume {volume}")
-        if not self._check_property():
-            return
-        # ToDo: Prüfung, ob Pfad/File vorhanden ist, wurde bereits in den vorgelagerten Methoden geprüft
+
+        # Already done in method which called this one
+        # if not self._check_property():
+        #     return
+
         if not os.path.isfile(file_path):
             self.logger.error(f"Cannot find snipped file {file_path}")
             return
-        # ToDo: Prüfung, ob das Geräte Coordinator ist, wurde bereits in den vorgelagerten Methoden geprüft
-        if not self.is_coordinator:
-            sonos_speaker[self.coordinator]._play_snippet(file_path, webservice_url, volume, duration_offset, fade_in)
-        else:
 
-            # Check if stop() is part of currently supported transport actions.
-            # For example, stop() is not available when the speakter is in TV mode.
-            currentActions = self.current_transport_actions
-            self.logger.debug(f"play_snippet: checking transport actions: {currentActions}")
-            
-            with self._snippet_queue_lock:
-                snap = None
-                volumes = {}
-                # save all volumes from zone_member
-                for member in self.zone_group_members:
-                    if member != '':
-                        volumes[member] = sonos_speaker[member].volume
+        # Check if stop() is part of currently supported transport actions.
+        # For example, stop() is not available when the speaker is in TV mode.
+        currentActions = self.current_transport_actions
+        self.logger.debug(f"play_snippet: checking transport actions: {currentActions}")
 
-                tag = TinyTag.get(file_path)
-                self.logger.debug(f"tagduration {tag.duration}, duration_offset {duration_offset}")
-                if not tag.duration:
-                    self.logger.error("TinyTag duration is none.")
+        with self._snippet_queue_lock:
+            snap = None
+            volumes = {}
+            # save all volumes from zone_member
+            for member in self.zone_group_members:
+                if member != '':
+                    volumes[member] = sonos_speaker[member].volume
+
+            tag = TinyTag.get(file_path)
+            self.logger.debug(f"tagduration {tag.duration}, duration_offset {duration_offset}")
+            if not tag.duration:
+                self.logger.error("TinyTag duration is none.")
+            else:
+                duration = round(tag.duration) + duration_offset
+                self.logger.debug(f"TTS track duration: {duration}s, TTS track duration offset: {duration_offset}s")
+                file_name = quote(os.path.split(file_path)[1])
+                snippet_url = f"{webservice_url}/{file_name}"
+
+                # was GoogleTTS the last track? do not snapshot
+                last_station = self.radio_station.lower()
+                if last_station != "snippet":
+                    snap = Snapshot(self.soco)
+                    snap.snapshot()
+
+                time.sleep(0.5)
+                if 'Stop' in currentActions:
+                    self.set_stop()
+                if volume == -1:
+                    self.logger.debug(f"_play_snippet, volume is -1, reset to {self.volume}")
+                    volume = self.volume
+
+                self.set_volume(volume, group_command=True)
+                self.soco.play_uri(snippet_url, title="snippet")
+                time.sleep(duration)
+                if 'Stop' in currentActions:
+                    self.set_stop()
+
+                # Restore the Sonos device back to its previous state
+                if last_station != "snippet":
+                    if snap is not None:
+                        snap.restore()
                 else:
-                    duration = round(tag.duration) + duration_offset
-                    self.logger.debug(f"TTS track duration: {duration}s, TTS track duration offset: {duration_offset}s")
-                    file_name = quote(os.path.split(file_path)[1])
-                    snippet_url = f"{webservice_url}/{file_name}"
-
-                    # was GoogleTTS the last track? do not snapshot
-                    last_station = self.radio_station.lower()
-                    if last_station != "snippet":
-                        snap = Snapshot(self.soco)
-                        snap.snapshot()
-
-                    time.sleep(0.5)
-                    if 'Stop' in currentActions:
-                        self.set_stop()
-                    if volume == -1:
-                        self.logger.debug(f"_play_snippet, volume is -1, reset to {self.volume}")
-                        volume = self.volume
-
-                    self.set_volume(volume, group_command=True)
-                    self.soco.play_uri(snippet_url, title="snippet")
-                    time.sleep(duration)
-                    if 'Stop' in currentActions:
-                        self.set_stop()
-
-                    # Restore the Sonos device back to its previous state
-                    if last_station != "snippet":
-                        if snap is not None:
-                            snap.restore()
-                    else:
-                        self.radio_station = ""
-                    for member in self.zone_group_members:
-                        if member in volumes:
-                            if fade_in:
-                                vol_to_ramp = volumes[member]
-                                sonos_speaker[member].soco.volume = 0
-                                sonos_speaker[member].soco.renderingControl.RampToVolume(
-                                                                                         [('InstanceID', 0), ('Channel', 'Master'),
-                                                                                          ('RampType', 'SLEEP_TIMER_RAMP_TYPE'),
-                                                                                          ('DesiredVolume', vol_to_ramp),
-                                                                                          ('ResetVolumeAfter', False), ('ProgramURI', '')])
-                            else:
-                                sonos_speaker[member].set_volume(volumes[member], group_command=False)
+                    self.radio_station = ""
+                for member in self.zone_group_members:
+                    if member in volumes:
+                        if fade_in:
+                            vol_to_ramp = volumes[member]
+                            sonos_speaker[member].soco.volume = 0
+                            sonos_speaker[member].soco.renderingControl.RampToVolume(
+                                                                                     [('InstanceID', 0), ('Channel', 'Master'),
+                                                                                      ('RampType', 'SLEEP_TIMER_RAMP_TYPE'),
+                                                                                      ('DesiredVolume', vol_to_ramp),
+                                                                                      ('ResetVolumeAfter', False), ('ProgramURI', '')])
+                        else:
+                            sonos_speaker[member].set_volume(volumes[member], group_command=False)
 
     def play_snippet(self, audio_file, local_webservice_path_snippet: str, webservice_url: str, volume: int = -1, duration_offset: float = 0, fade_in=False) -> None:
         if not self._check_property():
@@ -2455,10 +2441,6 @@ class Speaker(object):
         if not self.is_coordinator:
             sonos_speaker[self.coordinator].play_snippet(audio_file, local_webservice_path_snippet, webservice_url, volume, duration_offset, fade_in)
         else:
-            # ToDo: Prüfung, das tinytag verfügbar ist, passiert bereits beim Pluginstart
-            if "tinytag" not in sys.modules:
-                self.logger.error("TinyTag module not installed. Please install the module with 'sudo pip3 install tinytag'.")
-                return
             file_path = os.path.join(local_webservice_path_snippet, audio_file)
 
             if not os.path.exists(file_path):
@@ -2472,10 +2454,6 @@ class Speaker(object):
         if not self.is_coordinator:
             sonos_speaker[self.coordinator].play_tts(tts, tts_language, local_webservice_path, webservice_url, volume, duration_offset, fade_in)
         else:
-            # ToDo: Prüfung, das tinytag verfügbar ist, passiert bereits beim Pluginstart
-            if "tinytag" not in sys.modules:
-                self.logger.error("TinyTag module not installed. Please install the module with 'sudo pip3 install tinytag'.")
-                return
             file_path = utils.get_tts_local_file_path(local_webservice_path, tts, tts_language)
 
             # only do a tts call if file not exists
@@ -2530,23 +2508,217 @@ class Speaker(object):
             except Exception:
                 self.logger.warning(f"load_sonos_playlist: No Sonos playlist found with title '{name}'.")
 
+    def _play_favorite(self, favorite_title: str = None, favorite_number: int = None) -> tuple:
+        """Core of the play_favorite action, but doesn't exit on failure"""
+
+        favorites = self.soco.music_library.get_sonos_favorites(complete_result=True)
+
+        if favorite_number:
+            err_msg = f"Favorite number must be integer between 1 and {len(favorites)}"
+            try:
+                favorite_number = int(favorite_number)
+            except ValueError:
+                return False, err_msg
+            if not 0 < favorite_number <= len(favorites):
+                return False, err_msg
+
+            # List must be sorted by title to match the output of 'list_favorites'
+            favorites.sort(key=lambda x: x.title)
+            the_fav = favorites[favorite_number - 1]
+            self.logger.info(f"Favorite number {favorite_number} is '{the_fav.title}'")
+
+        else:
+            the_fav = None
+            # Strict match
+            for f in favorites:
+                if favorite_title == f.title:
+                    self.logger.info(f"Strict match '{f.title}' found")
+                    the_fav = f
+                    break
+
+            # Fuzzy match
+            if not the_fav:
+                favorite_title = favorite_title.lower()
+                for f in favorites:
+                    if favorite_title in f.title.lower():
+                        self.logger.info(f"Fuzzy match '{f.title}' found")
+                        the_fav = f
+                        break
+
+        if the_fav:
+            # play_uri works for some favorites
+            try:
+                uri = the_fav.get_uri()
+                metadata = the_fav.resource_meta_data
+                self.logger.info(f"Trying 'play_uri()': URI={uri}, Metadata={metadata}")
+                self.soco.play_uri(uri=uri, meta=metadata)
+                return True, ""
+            except Exception as e:
+                e1 = e
+
+            # Other favorites will be added to the queue, then played
+            try:
+                self.logger.info("Trying 'add_to_queue()'")
+                index = self.soco.add_to_queue(the_fav, as_next=True)
+                self.soco.play_from_queue(index, start=True)
+                return True, ""
+            except Exception as e2:
+                msg = f"1: {e1} | 2: {e2}"
+                return False, msg
+        msg = f"Favorite '{favorite_title}' not found"
+        return False, msg
+
+    def play_favorite_title(self, favorite_title: str) -> bool:
+        """
+        Play Sonos favorite by title
+        :param favorite_title:
+        :return:
+        """
+        if not self._check_property():
+            return
+        if not self.is_coordinator:
+            sonos_speaker[self.coordinator].play_favorite_title(favorite_title)
+        else:
+            self.logger.info(f"Playing favorite {favorite_title}")
+            result, msg = self._play_favorite(favorite_title=favorite_title)
+            if not result:
+                self.logger.warning(msg)
+                return False
+            return True
+
+    def play_favorite_number(self, favorite_number: int) -> bool:
+        """
+        Play Sonos favorite by list index
+        :param favorite_number:
+        :return:
+        """
+        if not self._check_property():
+            return
+        if not self.is_coordinator:
+            sonos_speaker[self.coordinator].play_favorite_number(favorite_number)
+        else:
+            self.logger.info(f"Playing favorite number {favorite_number}")
+            result, msg = self._play_favorite(favorite_number=favorite_number)
+            if not result:
+                self.logger.warning(msg)
+                return False
+            return True
+
+    def _play_favorite_radio(self, station_title: str = None, station_number: int = None, preset: int = 0, limit: int = 99) -> tuple:
+        """Core of the play_favorite_radio action, but doesn't exit on failure"""
+
+        stations = self.soco.music_library.get_favorite_radio_stations(preset, limit)
+
+        # get station_title by station_number
+        if station_number:
+            err_msg = f"Favorite station number must be integer between 1 and {len(stations)}"
+            try:
+                station_number = int(station_number)
+            except ValueError:
+                return False, err_msg
+            if not 0 < station_number <= len(stations):
+                return False, err_msg
+
+            # List must be sorted by title to match the output of 'list_favorites'
+            station_titles = sorted([s.title for s in stations])
+            self.logger.info(f"Sorted station titles are: {station_titles}")
+
+            station_title = station_titles[station_number - 1]
+            self.logger.info(f"Requested station is '{station_title}'")
+
+        # get station object
+        the_fav = None
+        # Strict match
+        for f in stations:
+            if station_title == f.title:
+                self.logger.info(f"Strict match '{f.title}' found")
+                the_fav = f
+                break
+
+        # Fuzzy match
+        station_title = station_title.lower()
+        if not the_fav:
+            for f in stations:
+                if station_title in f.title.lower():
+                    self.logger.info(f"Fuzzy match '{f.title}' found")
+                    the_fav = f
+                    break
+
+        # set to play
+        if the_fav:
+            uri = the_fav.get_uri()
+            meta_template = """
+                            <DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/"
+                                xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"
+                                xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/"
+                                xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">
+                                <item id="R:0/0/0" parentID="R:0/0" restricted="true">
+                                    <dc:title>{title}</dc:title>
+                                    <upnp:class>object.item.audioItem.audioBroadcast</upnp:class>
+                                    <desc id="cdudn" nameSpace="urn:schemas-rinconnetworks-com:metadata-1-0/">
+                                        {service}
+                                    </desc>
+                                </item>
+                            </DIDL-Lite>' 
+                            """
+            tunein_service = "SA_RINCON65031_"
+            uri = uri.replace("&", "&amp;")
+            metadata = meta_template.format(title=the_fav.title, service=tunein_service)
+            self.logger.info(f"Trying 'play_uri()': URI={uri}, Metadata={metadata}")
+            self.soco.play_uri(uri=uri, meta=metadata)
+            return True, ""
+
+        msg = f"Favorite Radio Station '{station_title}' not found"
+        return False, msg
+
+    def play_favorite_radio_number(self, station_number: int) -> bool:
+        """
+        Play Sonos radio favorite by list index
+        :param station_number:
+        :return:
+        """
+        if not self._check_property():
+            return
+        if not self.is_coordinator:
+            sonos_speaker[self.coordinator].play_favorite_radio_number(station_number)
+        else:
+            self.logger.info(f"Playing favorite station number {station_number}")
+            result, msg = self._play_favorite_radio(station_number=station_number)
+            if not result:
+                self.logger.warning(msg)
+                return False
+            return True
+
+    def play_favorite_radio_title(self, station_title: str) -> bool:
+        """
+        Play Sonos favorite radio station by title
+        :param station_title:
+        :return:
+        """
+        if not self._check_property():
+            return
+        if not self.is_coordinator:
+            sonos_speaker[self.coordinator].play_favorite_radio_title(station_title)
+        else:
+            self.logger.info(f"Playing radio favorite {station_title}")
+            result, msg = self._play_favorite_radio(station_title=station_title)
+            if not result:
+                self.logger.warning(msg)
+                return False
+            return True
+
 
 class Sonos(SmartPlugin):
     """
     Main class of the Plugin. Does all plugin specific stuff
     """
-    PLUGIN_VERSION = "1.6.9"
+    PLUGIN_VERSION = "1.8.0"
 
     def __init__(self, sh):
         """Initializes the plugin."""
 
         # call init code of parent class (SmartPlugin)
         super().__init__()
-
-        # exit if the required package(s) could not be imported
-        if not REQUIRED_PACKAGE_IMPORTED:
-            self.logger.error(f"{self.get_fullname()}: Unable to import required external python packages. Please check installation.")
-            return
 
         # get the parameters for the plugin (as defined in metadata plugin.yaml):
         try:
@@ -2604,8 +2776,7 @@ class Sonos(SmartPlugin):
         
         # do initial speaker discovery and set scheduler
         self._discover()
-        if not self._speaker_ips:
-            self.scheduler_add("sonos_discover_scheduler", self._discover, prio=3, cron=None, cycle=self._discover_cycle, value=None, offset=None, next=None)
+        self.scheduler_add("sonos_discover_scheduler", self._discover, prio=3, cron=None, cycle=self._discover_cycle, value=None, offset=None, next=None)
 
         # set plugin to alive
         self.alive = True
@@ -2999,6 +3170,7 @@ class Sonos(SmartPlugin):
                     clear_queue = self._resolve_child_command_bool(item, 'clear_queue')
                     track = self._resolve_child_command_int(item, 'start_track')
                     sonos_speaker[uid].load_sonos_playlist(item(), start, clear_queue, track)
+
                 elif command == 'play_tts':
                     if item() == "":
                         self.logger.error("No item value when executing 'play_tts' command")
@@ -3007,7 +3179,8 @@ class Sonos(SmartPlugin):
                     volume = self._resolve_child_command_int(item, 'tts_volume', -1)
                     fade_in = self._resolve_child_command_bool(item, 'tts_fade_in')
                     sonos_speaker[uid].play_tts(item(), language, self._local_webservice_path, self._webservice_url, volume, self._snippet_duration_offset, fade_in)
-                elif command == 'play_snippet' and item() != "":
+
+                elif command == 'play_snippet':
                     if item() == "":
                         self.logger.error("No item value when executing 'play_snippet' command")
                         return
@@ -3015,6 +3188,30 @@ class Sonos(SmartPlugin):
                     self.logger.debug(f"play_snippet on uid {uid} with volume {volume}")
                     fade_in = self._resolve_child_command_bool(item, 'snippet_fade_in')
                     sonos_speaker[uid].play_snippet(item(), self._local_webservice_path_snippet, self._webservice_url, volume, self._snippet_duration_offset, fade_in)
+
+                elif command == 'play_favorite_title':
+                    if item() == "":
+                        self.logger.error("No item value when executing 'play_favorite_title' command")
+                        return
+                    sonos_speaker[uid].play_favorite_title(item())
+
+                elif command == 'play_favorite_number':
+                    if item() == "":
+                        self.logger.error("No item value when executing 'play_favorite_number' command")
+                        return
+                    sonos_speaker[uid].play_favorite_number(item())
+
+                elif command == 'play_favorite_radio_number':
+                    if item() == "":
+                        self.logger.error("No item value when executing 'play_favorite_radio_number' command")
+                        return
+                    sonos_speaker[uid].play_favorite_radio_number(item())
+
+                elif command == 'play_favorite_radio_title':
+                    if item() == "":
+                        self.logger.error("No item value when executing 'play_favorite_radio_title' command")
+                        return
+                    sonos_speaker[uid].play_favorite_radio_title(item())
 
     def _resolve_child_command_str(self, item: Items, child_command: str, default_value: str = "") -> str:
         """
