@@ -389,8 +389,8 @@ Unteritem ``tts_fade_in``:
 Wird ein untergeordnetes Item vom Typ Boolean mit Attribut ``sonos_attrib: tts_fade_in`` definiert, wird die Lautstärke
 nach dem Abspielen der Nachricht von 0 auf das gewünschte Level schrittweise angehoben und eingeblendet. 
 
-play_tunein
------------
+play_tunein / play_sonos_radio
+------------------------------
 ``write``
 
 Spielt einen Radiosender anhand eines Namens. Das Item ist vom Typ String. Sonos sucht dazu in einer Datenbank
