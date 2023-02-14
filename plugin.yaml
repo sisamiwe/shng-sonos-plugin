@@ -225,6 +225,7 @@ item_attributes:
     - play_favorite_number
     - play_favorite_radio_title
     - play_favorite_radio_number
+    - play_sonos_radio
 
   sonos_attrib:
     type: str
@@ -496,6 +497,15 @@ item_structs:
     play_tunein:
       type: str
       sonos_send: play_tunein
+
+      start_after:
+        type: bool
+        initial_value: True
+        sonos_attrib: start_after
+
+    play_sonos_radio:
+      type: str
+      sonos_send: play_sonos_radio
 
       start_after:
         type: bool

@@ -623,7 +623,7 @@ class Speaker(object):
             while not sub_handler.signal.wait(1):
                 try:
                     event = sub_handler.event.events.get(timeout=0.5)
-                    self.logger.debug(f"_av_transport_event: event.__dict__={event.__dict__}")
+                    self._av_transport_event = event
 
                     # set streaming type
                     if self.soco.is_playing_line_in:
@@ -742,9 +742,13 @@ class Speaker(object):
                         # we need the title from 'enqueued_transport_uri_meta_data'
                         if 'enqueued_transport_uri_meta_data' in event.variables:
                             radio_metadata = event.variables['enqueued_transport_uri_meta_data']
-                            if hasattr(radio_metadata, 'title'):
-                                if self.streamtype == 'radio':
-                                    self.radio_station = str(radio_metadata.title)
+                            if isinstance(radio_metadata, str):
+                                radio_station = radio_metadata[radio_metadata.find('<dc:title>') + 10:radio_metadata.find('</dc:title>')]
+                            elif hasattr(radio_metadata, 'title'):
+                                radio_station = str(radio_metadata.title)
+                            else:
+                                radio_station = ""
+                            self.radio_station = radio_station
                     else:
                         self.radio_station = ''
 
@@ -2146,85 +2150,138 @@ class Speaker(object):
 
     def play_tunein(self, station_name: str, start: bool = True) -> None:
         """
-        Plays a radio station by a given radio name. If more than one radio station are found, the first result will be
-        played.
+        Plays a radio station from TuneIn by a given radio name. If more than one radio station are found,
+        the first result will be played.
         :param station_name: radio station name
         :param start: Start playing after setting the radio stream? Default: True
         :return: None
         """
 
-        # ------------------------------------------------------------------------------------------------------------ #
-
-        # This code here is a quick workaround for issue https://github.com/SoCo/SoCo/issues/557 and will be fixed
-        # if a patch is applied.
-
-        # ------------------------------------------------------------------------------------------------------------ #
-
         if not self._check_property():
             return
+
         if not self.is_coordinator:
             sonos_speaker[self.coordinator].play_tunein(station_name, start)
         else:
+            result, msg = self._play_radio(station_name=station_name, music_service='TuneIn', start=start)
+            if not result:
+                self.logger.warning(msg)
+                return False
+            return True
 
-            data = '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Header><credentials ' \
-                   'xmlns="http://www.sonos.com/Services/1.1"><deviceId>anon</deviceId>' \
-                   '<deviceProvider>Sonos</deviceProvider></credentials></s:Header><s:Body>' \
-                   '<search xmlns="http://www.sonos.com/Services/1.1"><id>search:station</id><term>{search}</term>' \
-                   '<index>0</index><count>100</count></search></s:Body></s:Envelope>'.format(
-                    search=station_name)
+    def play_sonos_radio(self, station_name: str, start: bool = True) -> None:
+        """
+        Plays a radio station from Sonos Radio by a given radio name. If more than one radio station are found,
+        the first result will be played.
+        :param station_name: radio station name
+        :param start: Start playing after setting the radio stream? Default: True
+        :return: None
+        """
 
-            headers = {
-                "SOAPACTION": "http://www.sonos.com/Services/1.1#search",
-                "USER-AGENT": "Linux UPnP/1.0 Sonos/40.5-49250 (WDCR:Microsoft Windows NT 10.0.16299)",
-                "CONTENT-TYPE": 'text/xml; charset="utf-8"'
-            }
+        if not self._check_property():
+            return
 
-            response = requests.post("http://legato.radiotime.com/Radio.asmx", data=data.encode("utf-8"), headers=headers)
-            schema = XML.fromstring(response.content)
-            body = schema.find("{http://schemas.xmlsoap.org/soap/envelope/}Body")[0]
+        if not self.is_coordinator:
+            sonos_speaker[self.coordinator].play_sonos_radio(station_name, start)
+        else:
+            result, msg = self._play_radio(station_name=station_name, music_service='Sonos Radio', start=start)
+            if not result:
+                self.logger.warning(msg)
+                return False
+            return True
 
-            response = list(xmltodict.parse(XML.tostring(body), process_namespaces=True,
-                                            namespaces={'http://www.sonos.com/Services/1.1': None}).values())[0]
+    def _play_radio(self, station_name: str, music_service: str = 'TuneIn', start: bool = True) -> tuple:
+        """
+        Plays a radio station by a given radio name at a given music service. If more than one radio station are found,
+        the first result will be played.
+        :param music_service: music service name Default: TuneIn
+        :param station_name: radio station name
+        :param start: Start playing after setting the radio stream? Default: True
+        :return: None
+        """
 
-            items = []
-            # The result to be parsed is in either searchResult or getMetadataResult
-            if 'searchResult' in response:
-                response = response['searchResult']
-            elif 'getMetadataResult' in response:
-                response = response['getMetadataResult']
-            else:
-                raise ValueError('"response" should contain either the key "searchResult" or "getMetadataResult"')
+        meta_template = """
+                        <DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/"
+                            xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"
+                            xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/"
+                            xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">
+                            <item id="R:0/0/0" parentID="R:0/0" restricted="true">
+                                <dc:title>{title}</dc:title>
+                                <upnp:albumArtURI>{station_logo}</upnp:albumArtURI>
+                                <upnp:class>object.item.audioItem.audioBroadcast</upnp:class>
+                                <desc id="cdudn" nameSpace="urn:schemas-rinconnetworks-com:metadata-1-0/">
+                                    {service}
+                                </desc>
+                            </item>
+                        </DIDL-Lite>' 
+                        """
 
-            for result_type in ('mediaCollection', 'mediaMetadata'):
-                # Upper case the first letter (used for the class_key)
-                result_type_proper = result_type[0].upper() + result_type[1:]
-                raw_items = response.get(result_type, [])
-                # If there is only 1 result, it is not put in an array
-                if isinstance(raw_items, OrderedDict):
-                    raw_items = [raw_items]
+        # get all music services
+        all_music_services_names = MusicService.get_all_music_services_names()
 
-                for raw_item in raw_items:
-                    # Form the class_key, which is a unique string for this type,
-                    # formed by concatenating the result type with the item type. Turns
-                    # into e.g: MediaMetadataTrack
-                    class_key = result_type_proper + raw_item['itemType'].title()
-                    cls = get_class(class_key)
-                    # from plugins.sonos.soco.music_services.token_store import JsonFileTokenStore
-                    items.append(cls.from_music_service(MusicService(service_name='TuneIn'), raw_item))
+        # check if given music service is available
+        if music_service not in all_music_services_names:
+            return False, f"Requested Music Service '{music_service}' not available"
 
-            if not items:
-                exit(0)
+        # get music service instance
+        music_service = MusicService(music_service)
 
-            item_id = items[0].metadata['id']
-            sid = 254  # hard-coded TuneIn service id ?
-            sn = 0
-            meta = to_didl_string(items[0])
+        # adapt station_name for optimal search results
+        if " " in station_name:
+            station_name_for_search = station_name.split(" ", 1)[0]
+        elif station_name[-1].isdigit():
+            station_name_for_search = station_name[:-1]
+        else:
+            station_name_for_search = station_name
 
-            uri = f"x-sonosapi-stream:{item_id}?sid={sid}&flags=8224&sn={sn}"
+        # do search
+        search_result = music_service.search(category='stations', term=station_name_for_search, index=0, count=100)
 
-            self.soco.avTransport.SetAVTransportURI([('InstanceID', 0), ('CurrentURI', uri), ('CurrentURIMetaData', meta)])
-            if start:
-                self.soco.play()
+        # get station object from search result
+        the_station = None
+        # Strict match
+        for station in search_result:
+            if station_name in station.title:
+                self.logger.info(f"Strict match '{station.title}' found")
+                the_station = station
+                break
+
+        # Fuzzy match
+        if not the_station:
+            station_name = station_name.lower()
+            for station in search_result:
+                if station_name in station.title.lower():
+                    self.logger.info(f"Fuzzy match '{station.title}' found")
+                    the_station = station
+                    break
+
+        # Very fuzzy match // handle StationNames ending on digit and add space in front
+        if not the_station:
+            last_char = len(station_name) - 1
+            if station_name[last_char].isdigit():
+                station_name = f"{station_name[0:last_char]} {station_name[last_char:]}"
+                for station in search_result:
+                    if station_name in station.title.lower():
+                        self.logger.info(f"Very fuzzy match '{station.title}' found")
+                        the_station = station
+                        break
+
+        if not the_station:
+            return False, f"No match for requested radio station {station_name}. Check spaces in station name"
+
+        uri = music_service.get_media_uri(the_station.id)
+
+        station_logo = the_station.stream_metadata.logo
+        if "%" in station_logo:
+            station_logo = unquote(station_logo)
+        if station_logo.startswith('https://sali.sonos.radio'):
+            station_logo = station_logo.split("image=")[1].split("&partnerId")[0]
+
+        metadata = meta_template.format(title=the_station.title, service=the_station.desc, station_logo=station_logo)
+
+        self.logger.info(f"Trying 'play_uri()': URI={uri}, Metadata={metadata}")
+        self.soco.play_uri(uri=uri, meta=metadata, title=the_station.title, start=start, force_radio=True)
+        return True, ""
 
     def play_sharelink(self, url: str, start: bool = True) -> None:
         """
@@ -2388,7 +2445,7 @@ class Speaker(object):
                     volumes[member] = sonos_speaker[member].volume
 
             tag = TinyTag.get(file_path)
-            self.logger.debug(f"tagduration {tag.duration}, duration_offset {duration_offset}")
+            self.logger.debug(f"tag-duration {tag.duration}, duration_offset {duration_offset}")
             if not tag.duration:
                 self.logger.error("TinyTag duration is none.")
             else:
@@ -3212,6 +3269,10 @@ class Sonos(SmartPlugin):
                         self.logger.error("No item value when executing 'play_favorite_radio_title' command")
                         return
                     sonos_speaker[uid].play_favorite_radio_title(item())
+
+                elif command == "play_sonos_radio":
+                    start = self._resolve_child_command_bool(item, 'start_after')
+                    sonos_speaker[uid].play_sonos_radio(item(), start)
 
     def _resolve_child_command_str(self, item: Items, child_command: str, default_value: str = "") -> str:
         """
