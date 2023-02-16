@@ -5,22 +5,12 @@ Plugin Changes
 
 - __init__.py
 	- class Speaker
-		- add method _play_favorite
-		- add method play_favorite_title
-		- add method play_favorite_number
-		- add method _play_favorite_radio
-		- add method play_favorite_radio_number
-		- add method play_favorite_radio_title
-		- remove check if tinytag is available; already done at startup
-		- implement _play_radio as general method to play radio from music services (based on play_tunein, reworked to use Soco instead of direct post request)
-		- reworked play_tunein to call _play_radio
-		- add play_sonos_radio to call _play_radio
-		- adapt _av_transport_event to show radio station if started via plugin
+		- update _play_radio to search for all words of requested radio stations
 
 	- class Sonos(SmartPlugin)
-		- bump version to 1.8.0
+		- bump version to 1.8.2
 		- __init__
-			- delete check of REQUIRED_PACKAGE_IMPORTED
+			- delete self.webif_pagelength = self.get_parameter_value('webif_pagelength') and use global parameter
 		- update_item:
 		    - add handling of play_favorite_title, play_favorite_number, play_favorite_radio_number, play_favorite_radio_title, _play_sonos_radio
 

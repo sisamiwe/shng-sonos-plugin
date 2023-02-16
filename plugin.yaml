@@ -12,7 +12,7 @@ plugin:
   documentation: https://github.com/smarthomeNG/plugins/blob/master/sonos/README.md
   support: https://knx-user-forum.de/forum/supportforen/smarthome-py/25151-sonos-anbindung
 
-  version: 1.8.0                 # Plugin version
+  version: 1.8.1                 # Plugin version
   sh_minversion: 1.5.1           # minimum shNG version to use this plugin
   py_minversion: 3.8             # minimum Python version to use for this plugin
   multi_instance: False          # plugin supports multi instance
@@ -84,28 +84,6 @@ parameters:
     description:
       de: "(optional) Verlängert die Dauer von Snippet Audio Dateien um einen festen Offset in Sekunden."
       en: "(optional) Extend snippet duration by a fixed offset specified in seconds"
-
-  webif_pagelength:
-    type: int
-    default: 0
-    valid_list:
-      - -1
-      - 0
-      - 25
-      - 50
-      - 100
-    description:
-      de: 'Anzahl an Items, die standardmäßig in einer Web Interface Tabelle pro Seite angezeigt werden.
-           0 = automatisch, -1 = alle'
-      en: 'Amount of items being listed in a web interface table per page by default.
-           0 = automatic, -1 = all'
-    description_long:
-      de: 'Anzahl an Items, die standardmäßig in einer Web Interface Tabelle pro Seite angezeigt werden.\n
-           Bei 0 wird die Tabelle automatisch an die Höhe des Browserfensters angepasst.\n
-           Bei -1 werden alle Tabelleneinträge auf einer Seite angezeigt.'
-      en: 'Amount of items being listed in a web interface table per page by default.\n
-           0 adjusts the table height automatically based on the height of the browser windows.\n
-           -1 shows all table entries on one page.'
 
 item_attributes:
   sonos_uid:
@@ -497,6 +475,7 @@ item_structs:
     play_tunein:
       type: str
       sonos_send: play_tunein
+      enforce_updates: true
 
       start_after:
         type: bool
@@ -506,6 +485,7 @@ item_structs:
     play_sonos_radio:
       type: str
       sonos_send: play_sonos_radio
+      enforce_updates: True
 
       start_after:
         type: bool
@@ -515,6 +495,7 @@ item_structs:
     play_url:
       type: str
       sonos_send: play_url
+      enforce_updates: True
 
       start_after:
         type: bool
@@ -591,18 +572,22 @@ item_structs:
     play_favorite_title:
       type: str
       sonos_send: play_favorite_title
+      enforce_updates: True
 
     play_favorite_number:
       type: num
       sonos_send: play_favorite_number
+      enforce_updates: True
 
     play_favorite_radio_title:
       type: str
       sonos_send: play_favorite_radio_title
+      enforce_updates: True
 
     play_favorite_radio_number:
       type: num
       sonos_send: play_favorite_radio_number
+      enforce_updates: True
 
   standard:
     # sonos_uid: rincon_xxxxxxxxxxxxxxxxx
@@ -819,6 +804,7 @@ item_structs:
     play_tunein:
       type: str
       sonos_send: play_tunein
+      enforce_updates: True
 
       start_after:
         type: bool
@@ -828,6 +814,7 @@ item_structs:
     play_url:
       type: str
       sonos_send: play_url
+      enforce_updates: True
 
       start_after:
         type: bool

@@ -53,7 +53,6 @@ from .soco.snapshot import Snapshot
 from .soco.xml import XML
 from .soco.plugins.sharelink import ShareLinkPlugin
 
-import xmltodict
 from tinytag import TinyTag
 from gtts import gTTS
 
@@ -2228,43 +2227,47 @@ class Speaker(object):
 
         # adapt station_name for optimal search results
         if " " in station_name:
-            station_name_for_search = station_name.split(" ", 1)[0]
+            station_name_for_search = sorted(station_name.split(" "), key=len, reverse=True)
         elif station_name[-1].isdigit():
-            station_name_for_search = station_name[:-1]
+            station_name_for_search = [station_name[:-1]]
         else:
-            station_name_for_search = station_name
+            station_name_for_search = [station_name]
 
-        # do search
-        search_result = music_service.search(category='stations', term=station_name_for_search, index=0, count=100)
-
-        # get station object from search result
+        # do search and get station object from search result
         the_station = None
-        # Strict match
-        for station in search_result:
-            if station_name in station.title:
-                self.logger.info(f"Strict match '{station.title}' found")
-                the_station = station
-                break
+        for entry in station_name_for_search:
+            self.logger.debug(f"Request MusicService for RadioStation '{station_name}' with term={entry}")
+            search_result = music_service.search(category='stations', term=entry, index=0, count=100)
 
-        # Fuzzy match
-        if not the_station:
-            station_name = station_name.lower()
+            # get station object from search result with strict match
             for station in search_result:
-                if station_name in station.title.lower():
-                    self.logger.info(f"Fuzzy match '{station.title}' found")
+                if station_name in station.title:
+                    self.logger.info(f"Strict match '{station.title}' found")
                     the_station = station
                     break
 
-        # Very fuzzy match // handle StationNames ending on digit and add space in front
-        if not the_station:
-            last_char = len(station_name) - 1
-            if station_name[last_char].isdigit():
-                station_name = f"{station_name[0:last_char]} {station_name[last_char:]}"
+            # get station object from search result with fuzzy match
+            if the_station is None:
+                station_name = station_name.lower()
                 for station in search_result:
                     if station_name in station.title.lower():
-                        self.logger.info(f"Very fuzzy match '{station.title}' found")
+                        self.logger.info(f"Fuzzy match '{station.title}' found")
                         the_station = station
                         break
+
+            # get station object from search result with very fuzzy match // handle StationNames ending on digit and add space in front
+            if the_station is None:
+                last_char = len(station_name) - 1
+                if station_name[last_char].isdigit():
+                    station_name = f"{station_name[0:last_char]} {station_name[last_char:]}"
+                    for station in search_result:
+                        if station_name in station.title.lower():
+                            self.logger.info(f"Very fuzzy match '{station.title}' found")
+                            the_station = station
+                            break
+            else:
+                continue
+            break
 
         if not the_station:
             return False, f"No match for requested radio station {station_name}. Check spaces in station name"
@@ -2570,7 +2573,7 @@ class Speaker(object):
 
         favorites = self.soco.music_library.get_sonos_favorites(complete_result=True)
 
-        if favorite_number:
+        if favorite_number is not None:
             err_msg = f"Favorite number must be integer between 1 and {len(favorites)}"
             try:
                 favorite_number = int(favorite_number)
@@ -2667,7 +2670,7 @@ class Speaker(object):
         stations = self.soco.music_library.get_favorite_radio_stations(preset, limit)
 
         # get station_title by station_number
-        if station_number:
+        if station_number is not None:
             err_msg = f"Favorite station number must be integer between 1 and {len(stations)}"
             try:
                 station_number = int(station_number)
@@ -2769,7 +2772,7 @@ class Sonos(SmartPlugin):
     """
     Main class of the Plugin. Does all plugin specific stuff
     """
-    PLUGIN_VERSION = "1.8.0"
+    PLUGIN_VERSION = "1.8.2"
 
     def __init__(self, sh):
         """Initializes the plugin."""
@@ -2782,7 +2785,6 @@ class Sonos(SmartPlugin):
             self._tts = self.get_parameter_value("tts")
             self._snippet_duration_offset = float(self.get_parameter_value("snippet_duration_offset"))
             self._discover_cycle = self.get_parameter_value("discover_cycle")
-            self.webif_pagelength = self.get_parameter_value('webif_pagelength')
             local_webservice_path = self.get_parameter_value("local_webservice_path")
             local_webservice_path_snippet = self.get_parameter_value("local_webservice_path_snippet")
             webservice_ip = self.get_parameter_value("webservice_ip")
@@ -3533,6 +3535,58 @@ class Sonos(SmartPlugin):
         for zone in self.zones:
             if zone._uid.lower() == uid.lower():
                 return zone._player_name
+
+    def play_alert_asyncron(self, zones: set = (), alert_uri: str = "", alert_volume: int = 20, alert_duration: int = 0, fade_back: bool = False) -> None:
+        """
+        Play alert across multiple Sonos players using soco.snapshot
+
+        :param zones:           a set of SoCo objects
+        :param alert_uri:       uri that Sonos can play as an alert
+        :param alert_volume:    volume level for playing alert (0 tp 100)
+        :param alert_duration:  length of alert (if zero then length of track)
+        :param fade_back:       on reinstating the zones fade up the sound?
+        :return:
+        """
+
+        if zones == ():
+            zones = self.zones
+
+        if alert_uri == "":
+            alert_uri = "https://ia800503.us.archive.org/8/items/futuresoundfx-98/futuresoundfx-96.mp3"
+
+        # Use soco.snapshot to capture current state of each zone to allow restore
+        for zone in zones:
+            zone.snap = Snapshot(zone)
+            zone.snap.snapshot()
+            self.logger.debug(f"snapshot of zone: {zone.player_name}")
+
+        # prepare all zones for playing the alert
+        for zone in zones:
+            # Each Sonos group has one coordinator only these can play, pause, etc.
+            if zone.is_coordinator:
+                if not zone.is_playing_tv:  # can't pause TV - so don't try!
+                    # pause music for each coordinator if playing
+                    trans_state = zone.get_current_transport_info()
+                    if trans_state["current_transport_state"] == "PLAYING":
+                        zone.pause()
+
+            # For every Sonos player set volume and mute for every zone
+            zone.volume = alert_volume
+            zone.mute = False
+
+        # play the sound (uri) on each sonos coordinator
+        self.logger.info(f"will play: {alert_uri} on all coordinators")
+        for zone in zones:
+            if zone.is_coordinator:
+                zone.play_uri(uri=alert_uri, title="Sonos Alert")
+
+        # wait for alert_duration
+        time.sleep(alert_duration)
+
+        # restore each zone to previous state
+        for zone in zones:
+            self.logger.debug(f"restoring {zone.player_name}")
+            zone.snap.restore(fade=fade_back)
 
     @property
     def sonos_speaker(self):
