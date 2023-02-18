@@ -2380,7 +2380,7 @@ class Speaker(object):
             self.logger.info(f"Error during soco.get_sonos_playlists(): {e}")
             return
 
-        self.logger.debug(f"sonos_playlists: {playlists=}")
+        self.logger.debug(f"sonos_playlists: {playlists}")
 
         sonos_playlist_list = []
         for value in playlists:
@@ -2397,7 +2397,7 @@ class Speaker(object):
         except Exception as e:
             self.logger.info(f"Error during soco.music_library.get_sonos_favorites(): {e}")
             return
-        self.logger.debug(f"sonos_favorites: {favorites=}")
+        self.logger.debug(f"sonos_favorites: {favorites}")
 
         sonos_favorite_list = []
         for favorite in favorites:
@@ -2414,7 +2414,7 @@ class Speaker(object):
         except Exception as e:
             self.logger.info(f"Error during soco.music_library.get_favorite_radio_stations(): {e}")
             return
-        self.logger.debug(f"favorite_radio_stations: {radio_stations=}")
+        self.logger.debug(f"favorite_radio_stations: {radio_stations}")
 
         favorite_radio_station_list = []
         for favorite in radio_stations:
@@ -2805,6 +2805,7 @@ class Sonos(SmartPlugin):
         self.item_list = []                 # list of all items, used by / linked to that plugin
         self.alive = False                  # plugin alive property
         self.webservice = None              # webservice thread
+        soco_log_level_name = ""            # LogLevel of Soco modules / if string is empty, Soco modules will be set to same log level as plugin itself
         
         # handle fixed speaker ips
         if speaker_ips:
@@ -2823,8 +2824,8 @@ class Sonos(SmartPlugin):
         self.logger.info(f"Loading SoCo version {self.SoCo_version}.")
 
         # configure log level of SoCo modules:
-        self._set_soco_logger('WARNING')
-        
+        self._set_soco_logger(soco_log_level_name)
+
         # init webinterface
         self.init_webinterface(WebInterface)
         return
@@ -3134,20 +3135,30 @@ class Sonos(SmartPlugin):
             soco_version = metadata['version']
             return soco_version
 
-    def _set_soco_logger(self, level: str = 'WARNING') -> None:
+    def _set_soco_logger(self, log_level_name: str = None) -> None:
         """
         set all soco loggers to given level
         """
-        
-        level = level.upper()
-        log_level = logging.getLevelName(level)
-        
-        logging.getLogger('plugins.sonos.soco.events_base').setLevel(log_level)
-        logging.getLogger('plugins.sonos.soco.events').setLevel(log_level)
-        logging.getLogger('plugins.sonos.soco.discovery').setLevel(log_level)
-        logging.getLogger('plugins.sonos.soco.services').setLevel(log_level)
-        
-        self.logger.info(f"Set all SoCo loglevel to {level}")
+
+        if log_level_name is None or log_level_name == "":
+            log_level_name = self.log_level_name
+        else:
+            log_level_name = log_level_name.upper()
+
+            if log_level_name not in ['WARNING', 'CRITICAL', 'ERROR', 'INFO', 'DEBUG']:
+                self.logger.warning(f"Defined LogLevel={log_level_name} for Soco unknown. Will be set to 'WARNING'")
+                log_level_name = "WARNING"
+
+        log_level = logging.getLevelName(log_level_name)
+
+        logging.getLogger(f'plugins.{self.get_shortname()}.soco.events_base').setLevel(log_level)
+        logging.getLogger(f'plugins.{self.get_shortname()}.soco.events').setLevel(log_level)
+        logging.getLogger(f'plugins.{self.get_shortname()}.soco.discovery').setLevel(log_level)
+        logging.getLogger(f'plugins.{self.get_shortname()}.soco.services').setLevel(log_level)
+        logging.getLogger(f'plugins.{self.get_shortname()}.soco.data_structures_entry').setLevel(log_level)
+        logging.getLogger(f'plugins.{self.get_shortname()}.soco.zonegroupstate').setLevel(log_level)
+
+        self.logger.warning(f"Set all SoCo loggers to {log_level_name} with loglevel={log_level}")
 
     def parse_logic(self, logic):
         pass
@@ -3608,7 +3619,7 @@ class Sonos(SmartPlugin):
         for zone in self.zones:
             if len(zone.group.members) > len(_biggest_zone.group.members):
                 _biggest_zone = zone
-        self.logger.debug(f"{_biggest_zone.player_name=}")
+        self.logger.debug(f"_biggest_zone={_biggest_zone.player_name}")
 
         return _biggest_zone
 
@@ -3618,12 +3629,12 @@ class Sonos(SmartPlugin):
             coordinator = self.zones.pop()
 
         for zone in self.zones:
-            self.logger.warning(f"try to join {zone.player_name=} to {coordinator.player_name}")
+            self.logger.warning(f"Try to join {zone.player_name} to {coordinator.player_name}")
             try:
                 zone.join(coordinator)
-                self.logger.warning(f"Successfully joined {zone.player_name=} to {coordinator.player_name}")
+                self.logger.warning(f"Successfully joined {zone.player_name} to {coordinator.player_name}")
             except:
-                self.logger.warning(f"failed to join {zone.player_name=}to {coordinator.player_name}")
+                self.logger.warning(f"Failed to join {zone.player_name} to {coordinator.player_name}")
                 pass
 
         return coordinator
@@ -3759,6 +3770,13 @@ class Sonos(SmartPlugin):
         Returns current logging level
         """
         return self.logger.getEffectiveLevel()
+
+    @property
+    def log_level_name(self):
+        """
+        Returns current logging level name
+        """
+        return logging.getLevelName(self.log_level)
 
 
 def _initialize_speaker(uid: str, logger: logging, plugin_shortname: str) -> None:
