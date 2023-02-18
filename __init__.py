@@ -3574,10 +3574,10 @@ class Sonos(SmartPlugin):
             zone.mute = False
 
         # play the sound (uri) on each sonos coordinator
-        self.logger.info(f"will play: {alert_uri} on all coordinators")
+        self.logger.info(f"will play: {uri} on all coordinators")
         for zone in zones:
             if zone.is_coordinator:
-                zone.play_uri(uri=alert_uri, title="Sonos Alert")
+                zone.play_uri(uri=uri, title="Sonos Alert")
 
         # wait for alert_duration
         time.sleep(alert_duration)
@@ -3714,12 +3714,11 @@ class Sonos(SmartPlugin):
         self.logger.warning(f"Topology={max_zone.all_groups}")
 
         # prepare max_zone for playing the alert
-        if max_zone.is_coordinator:
-            if not max_zone.is_playing_tv:  # can't pause TV - so don't try!
-                # pause music if playing
-                trans_state = max_zone.get_current_transport_info()
-                if trans_state["current_transport_state"] == "PLAYING":
-                    max_zone.pause()
+        if not max_zone.is_playing_tv:  # can't pause TV - so don't try!
+            # pause music if playing
+            trans_state = max_zone.get_current_transport_info()
+            if trans_state["current_transport_state"] == "PLAYING":
+                max_zone.pause()
 
         # set volume and un-mute
         max_zone.volume = alert_volume
