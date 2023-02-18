@@ -2226,7 +2226,8 @@ class Speaker(object):
 
         # adapt station_name for optimal search results
         if " " in station_name:
-            station_name_for_search = sorted(station_name.split(" "), key=len, reverse=True)
+            station_name_for_search = [station_name]
+            station_name_for_search.extend(sorted(station_name.split(" "), key=len, reverse=True))
         elif station_name[-1].isdigit():
             station_name_for_search = [station_name[:-1]]
         else:
@@ -2236,26 +2237,32 @@ class Speaker(object):
         the_station = None
         for entry in station_name_for_search:
             self.logger.debug(f"Request MusicService for RadioStation '{station_name}' with term={entry}")
-            search_result = music_service.search(category='stations', term=entry, index=0, count=100)
+            try:
+                search_result = music_service.search(category='stations', term=entry, index=0, count=100)
+            except Exception as e:
+                self.logger.info(f"Error {e} during request MusicService for RadioStation '{station_name}' with term={entry}")
+                pass
+            else:
+                # get station object from search result with strict match
+                for station in search_result:
+                    if station_name in station.title:
+                        self.logger.info(f"Strict match '{station.title}' found")
+                        the_station = station
+                        break
+                    if the_station is not None:
+                        break
 
-            # get station object from search result with strict match
-            for station in search_result:
-                if station_name in station.title:
-                    self.logger.info(f"Strict match '{station.title}' found")
-                    the_station = station
-                    break
-
-            # get station object from search result with fuzzy match
-            if the_station is None:
+                # get station object from search result with fuzzy match
                 station_name = station_name.lower()
                 for station in search_result:
                     if station_name in station.title.lower():
                         self.logger.info(f"Fuzzy match '{station.title}' found")
                         the_station = station
                         break
+                    if the_station is not None:
+                        break
 
-            # get station object from search result with very fuzzy match // handle StationNames ending on digit and add space in front
-            if the_station is None:
+                # get station object from search result with very fuzzy match // handle StationNames ending on digit and add space in front
                 last_char = len(station_name) - 1
                 if station_name[last_char].isdigit():
                     station_name = f"{station_name[0:last_char]} {station_name[last_char:]}"
@@ -2264,12 +2271,11 @@ class Speaker(object):
                             self.logger.info(f"Very fuzzy match '{station.title}' found")
                             the_station = station
                             break
-            else:
-                continue
-            break
+                        if the_station is not None:
+                            break
 
         if not the_station:
-            return False, f"No match for requested radio station {station_name}. Check spaces in station name"
+            return False, f"No match for requested radio station {station_name}. Check spaces in station name."
 
         uri = music_service.get_media_uri(the_station.id)
 
@@ -3633,7 +3639,7 @@ class Sonos(SmartPlugin):
             try:
                 zone.join(coordinator)
                 self.logger.warning(f"Successfully joined {zone.player_name} to {coordinator.player_name}")
-            except:
+            except Exception:
                 self.logger.warning(f"Failed to join {zone.player_name} to {coordinator.player_name}")
                 pass
 
