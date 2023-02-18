@@ -1331,7 +1331,6 @@ class Speaker(object):
 
         if self.is_coordinator:
             for member in self._zone_group_members:
-                self.logger.debug(f"****zone_group_members: {member=}")
                 if member is not self:
                     try:
                         self.logger.debug(f"Unsubscribe av event for uid '{self.uid}' in fct zone_group_members")
@@ -3534,14 +3533,14 @@ class Sonos(SmartPlugin):
 
         for zone in self.zones:
             if zone._uid.lower() == uid.lower():
-                return zone._player_name
+                return zone.player_name
 
-    def play_alert_asyncron(self, zones: set = (), alert_uri: str = "", alert_volume: int = 20, alert_duration: int = 0, fade_back: bool = False) -> None:
+    def play_alert_asyncron(self, zones: set = (), uri: str = None, alert_volume: int = 20, alert_duration: int = 0, fade_back: bool = False) -> None:
         """
         Play alert across multiple Sonos players using soco.snapshot
 
         :param zones:           a set of SoCo objects
-        :param alert_uri:       uri that Sonos can play as an alert
+        :param uri:       uri that Sonos can play as an alert
         :param alert_volume:    volume level for playing alert (0 tp 100)
         :param alert_duration:  length of alert (if zero then length of track)
         :param fade_back:       on reinstating the zones fade up the sound?
@@ -3551,8 +3550,8 @@ class Sonos(SmartPlugin):
         if zones == ():
             zones = self.zones
 
-        if alert_uri == "":
-            alert_uri = "https://ia800503.us.archive.org/8/items/futuresoundfx-98/futuresoundfx-96.mp3"
+        if uri is None:
+            uri = "https://ia800503.us.archive.org/8/items/futuresoundfx-98/futuresoundfx-96.mp3"
 
         # Use soco.snapshot to capture current state of each zone to allow restore
         for zone in zones:
@@ -3586,6 +3585,166 @@ class Sonos(SmartPlugin):
         # restore each zone to previous state
         for zone in zones:
             self.logger.debug(f"restoring {zone.player_name}")
+            zone.snap.restore(fade=fade_back)
+
+    def _store_topology(self):
+
+        self.logger.warning('_store_topology called')
+
+        # re-discover to have the latest topology
+        self._discover_lite()
+
+        _topology = set()
+        for zone in self.zones:
+            _topology.add(zone.group)
+
+        return _topology
+
+    def _get_biggest_zone(self):
+
+        self.logger.warning('_get_biggest_zone called')
+
+        _biggest_zone = self.zones.pop()
+        for zone in self.zones:
+            if len(zone.group.members) > len(_biggest_zone.group.members):
+                _biggest_zone = zone
+        self.logger.debug(f"{_biggest_zone.player_name=}")
+
+        return _biggest_zone
+
+    def _group_all_in_one_zone(self, coordinator=None):
+
+        if coordinator is None:
+            coordinator = self.zones.pop()
+
+        for zone in self.zones:
+            self.logger.warning(f"try to join {zone.player_name=} to {coordinator.player_name}")
+            try:
+                zone.join(coordinator)
+                self.logger.warning(f"Successfully joined {zone.player_name=} to {coordinator.player_name}")
+            except:
+                self.logger.warning(f"failed to join {zone.player_name=}to {coordinator.player_name}")
+                pass
+
+        return coordinator
+
+    def _ungroup_all_in_zone(self, zone):
+
+        self.logger.warning('_ungroup_all_in_zone called')
+
+        for member in zone.group.members:
+            if member.is_visible:
+                if member.is_coordinator:
+                    self.logger.debug(f"Not ungrouping coordinator speaker '{member.player_name}'")
+                else:
+                    member.unjoin()
+                    self.logger.debug(f"Ungrouped speaker '{member.player_name}'")
+
+    def _restore_topology(self, topology: set, double_check: bool = False):
+
+        self.logger.warning('_restore_topology called')
+
+        # re-discover to have the latest topology
+        self._discover_lite()
+
+        # create dict with named zones
+        _named_zones = {zone.player_name: zone for zone in self.zones}
+
+        # iterate to create recent topology
+        for zone in self.zones:
+            for zonegroup in topology:
+                if zone in zonegroup.members and zone != zonegroup.coordinator:  # Wenn aktuelle Zone damals Member war aber nicht Coordinator, dann
+                    self.logger.debug(f"Zone {zone.player_name} was Member of Coordinator {zonegroup.coordinator.player_name}")
+
+                    if zone not in _named_zones[zonegroup.coordinator.player_name].group.members:
+                        self.logger.debug(f"Re-grouping {zone.player_name} as Member to Coordinator {zonegroup.coordinator.player_name}")
+                        zone.join(zonegroup.coordinator)
+                        time.sleep(1)
+                    else:
+                        self.logger.debug('old member already part of new group')
+
+        if double_check is True:
+            time.sleep(1)
+            current_topology = self._store_topology()
+
+            delta = topology.intersection(current_topology)
+
+            if delta:
+                self.logger.debug(f"Something went wrong restoring group topology. Delta was {delta}")
+            else:
+                self.logger.debug("Restoring topology successful.")
+
+    def _discover_lite(self):
+
+        self.logger.warning('_discover_lite called')
+
+        try:
+            zones = soco.discover(timeout=5)
+        except Exception as e:
+            self.logger.error(f"Exception during soco discover function: {e}")
+            return
+
+        if zones is not None:
+            self.zone = zones
+
+    def play_all(self, uri: str = None, title: str = "alarm", alert_volume: int = 20, alert_duration: int = 0, fade_back: bool = False) -> None:
+
+        self.logger.warning(f"play_all called")
+
+        self._discover_lite()
+
+        if uri is None:
+            uri = "https://ia800503.us.archive.org/8/items/futuresoundfx-98/futuresoundfx-96.mp3"
+
+        # define coordinator
+        target_zone = self.zones.pop()
+        self.logger.warning(f"Zone {target_zone.player_name} will be used as coordinator for play_all")
+
+        # store zone topology
+        _topology = self._store_topology()
+
+        # do snapshot to capture current state of each zone to allow restore
+        for zone in self.zones:
+            zone.snap = Snapshot(zone)
+            zone.snap.snapshot()
+            self.logger.debug(f"snapshot of zone: {zone.player_name}")
+
+        # join all zones to target_zone
+        max_zone = self._group_all_in_one_zone(target_zone)
+        self.logger.warning(f"Topology={max_zone.all_groups}")
+
+        # prepare max_zone for playing the alert
+        if max_zone.is_coordinator:
+            if not max_zone.is_playing_tv:  # can't pause TV - so don't try!
+                # pause music if playing
+                trans_state = max_zone.get_current_transport_info()
+                if trans_state["current_transport_state"] == "PLAYING":
+                    max_zone.pause()
+
+        # set volume and un-mute
+        max_zone.volume = alert_volume
+        max_zone.mute = False
+
+        # try to play announcement
+        self.logger.warning(f"Try playing '{uri}' on all speakers synchronously")
+        try:
+            max_zone.play_uri(uri=uri, title=title)
+        except Exception:
+            self.logger.warning(f"Something went wrong playing: {uri} on all speakers synchronous")
+            pass
+
+        # wait for alert_duration
+        time.sleep(alert_duration)
+
+        # un-join all visible in the group
+        self._ungroup_all_in_zone(max_zone)
+
+        # restore topology
+        self._restore_topology(_topology)
+
+        # restore each zone to previous state
+        for zone in self.zones:
+            self.logger.warning(f"restoring {zone.player_name}")
             zone.snap.restore(fade=fade_back)
 
     @property
