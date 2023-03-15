@@ -2249,8 +2249,8 @@ class Speaker(object):
                         self.logger.info(f"Strict match '{station.title}' found")
                         the_station = station
                         break
-                    if the_station is not None:
-                        break
+                if the_station is not None:
+                    break
 
                 # get station object from search result with fuzzy match
                 station_name = station_name.lower()
@@ -2259,8 +2259,8 @@ class Speaker(object):
                         self.logger.info(f"Fuzzy match '{station.title}' found")
                         the_station = station
                         break
-                    if the_station is not None:
-                        break
+                if the_station is not None:
+                    break
 
                 # get station object from search result with very fuzzy match // handle StationNames ending on digit and add space in front
                 last_char = len(station_name) - 1
@@ -2271,8 +2271,8 @@ class Speaker(object):
                             self.logger.info(f"Very fuzzy match '{station.title}' found")
                             the_station = station
                             break
-                        if the_station is not None:
-                            break
+                    if the_station is not None:
+                        break
 
         if not the_station:
             return False, f"No match for requested radio station {station_name}. Check spaces in station name."
